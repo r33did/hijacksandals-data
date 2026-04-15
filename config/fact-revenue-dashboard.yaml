@@ -1,0 +1,17 @@
+schedule: "0 6 * * *"
+project: "hijack-sandal-masjid"
+tasks:
+  - name: test_task
+    type: bash
+    command: test.sh
+    depends_on: []
+    
+  - name: init_table
+    type: sql
+    command: int_table_b.sql
+    depends_on: []
+  
+  - name: load_tbl
+    type: sql
+    command: stg_table_a.sql
+    depends_on: [init_table]

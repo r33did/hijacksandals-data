@@ -1,0 +1,83 @@
+"category","name","code","brand","quantity","gross","sales","tax","sales_plus_tax","units_in_stock","unit_cost","profit","id","others"
+Hijacksandals/Product,Alto Orca,ALT-OG,"",415,0,224774900,0,224774900,343,207085000,17689900,"3ed92021-386f-4cf2-9be7-edcdb828c683",Alto
+Hijacksandals/Product,Alley Blach,ALB,"",338,0,128860000,0,128860000,945,128102000,758000,"0d20f3b6-833e-47c1-8ae6-04f229a17eef",Alley
+Hijacksandals/Product,Alley Salt,ALW,"",328,0,107806550,0,107806550,150,124312000,-16505450,e065edd2-ebb1-4608-a61a-402c990fa3f4,Alley
+Hijacksandals/Product,Alley Clay,AMR,"",278,0,94273048,0,94273048,345,105362000,-11088952,e565b323-e8c4-432f-bd64-0374b875630b,Alley
+Hijacksandals/Product,Twyla Sputnik,TWYS,"",144,0,93456000,0,93456000,0,93456000,0,"702cb4b9-7056-4519-ae52-23a2ee294042",Twyla
+Hijacksandals/Product,Flo Blach,IVB,"",135,0,86047200,0,86047200,0,84915000,1132200,fee66467-d674-4e4a-af9e-d6c9f49a0e78,Flo
+Hijacksandals/Product,Manic Coral,MHA,"",167,0,72495500,0,72495500,51,90013000,-17517500,d7ffebf9-0e64-4220-a2bb-b70286676196,Manic
+Hijacksandals/Product,Flo Brun,FLOB,"",86,0,64649619,0,64649619,0,62694000,1955619,"0198eb19-7077-7184-8b61-7f1cae27c512",Flo
+Hijacksandals/Product,Flo Sputnik,IVS,"",100,0,62900000,0,62900000,0,62900000,0,"786d3e31-8ba9-4cb8-bf99-6cd251c5ebb3",Flo
+Hijacksandals/Product,Campbell Taupe,CPTA,"",112,0,61488000,0,61488000,172,61488000,0,"1485a85d-dcc6-4a04-b2c3-494a88e0b76f",Campbell
+Hijacksandals/Product,Twyla Croco Noir,TCN,"",52,0,34851300,0,34851300,0,33748000,1103300,"5039377c-4a3a-4cc1-8f04-ca16bf3c6141",Twyla
+Hijacksandals/Product,Manic Rhea,MR,"",66,0,33732462,0,33732462,0,35574000,-1841538,"2062071a-13b1-4366-a0d4-20498d15733f",Manic
+Hijacksandals/Product,Alto Pickle,AL-P,"",55,0,26623450,0,26623450,0,27445000,-821550,b0adf29e-7346-4375-8cc8-9f532217d2a1,Alto
+Hijacksandals/Product,Flo Silven,FLOS,"",25,0,18225000,0,18225000,0,18225000,0,"0198eb1c-53a7-71c0-9dce-2d68d57ca226",Flo
+Hijacksandals/Product,Manic Nutmeg,MS-T,"",33,0,16067590,0,16067590,0,17787000,-1719410,f7218b08-19c3-457a-a3b2-cd496c5647e4,Manic
+Hijacksandals/Product,Alto Nutmeg,AN-S,"",33,0,15568800,0,15568800,0,16467000,-898200,"3bf5c641-284a-4c33-98ab-186adc3d268f",Alto
+Hijacksandals/Product,Alto Ether,AL-E,"",17,0,8757450,0,8757450,0,8483000,274450,dca24fb3-a453-4019-a554-554a6a6f6e62,Alto
+Hijacksandals/Product,Celtic Ymir,CY,"",20,0,8682600,0,8682600,0,9980000,-1297400,dc7c5b18-e645-4ff5-965f-e516e4b5ea1f,Celtic
+Hijacksandals/Product,Campbell Thyme,CMTH,"",16,0,8427150,0,8427150,0,8784000,-356850,"30ef3d91-2dcf-4a77-b19a-7583ed0e08c4",Campbell
+Hijacksandals/Product,Manic Cabin,MHR,"",16,0,8372512,0,8372512,0,8624000,-251488,b2973ce3-1df9-4e04-91d0-371308f46c7b,Manic
+Hijacksandals/Product,New Astro Blach,NAB,"",12,0,7982550,0,7982550,0,8748000,-765450,"61c07577-26a3-4c3f-92fa-39379348eae7",New
+Hijacksandals/Product,Flo Celeste,IVA,"",12,0,7548000,0,7548000,0,7548000,0,"105285d1-f5cf-44eb-ac72-00493af44fc7",Flo
+Hijacksandals/Product,Alto Orca Mach-1,ALT-AB,"",11,0,7297850,0,7297850,0,7909000,-611150,"6dc08997-c83f-4301-b9af-a91b4921ed2a",Alto
+Hijacksandals/Product,New Astro Sputnik,NAS,"",10,0,6852600,0,6852600,0,7290000,-437400,"916be8fd-f7e0-4ed3-807c-c2290e7a93ef",New
+Hijacksandals/Product,New Astro Nutmeg,NAN,"",9,0,6293169,0,6293169,0,6561000,-267831,"996ee82e-5a5d-4418-be3a-d326100862f3",New
+Hijacksandals/Product,Manic Pickle Blush,MNC-PCB,"",12,0,6036800,0,6036800,0,6468000,-431200,b65ced8f-7f43-438f-857d-3388f52a6a25,Manic
+Hijacksandals/Product,Alto Storm Mach-1,AGM,"",8,0,4966500,0,4966500,0,6160000,-1193500,ad2691e2-7d77-429b-877a-9f7c486241a4,Alto
+Hijacksandals/Product,Campbell Blach,CMPB,"",9,0,4941000,0,4941000,0,4941000,0,"5b9291af-cbd0-47da-bc0f-bfacc5c82532",Campbell
+Hijacksandals/Product,Alley Mer,ALX,"",13,0,4870150,0,4870150,0,4927000,-56850,"6ba589a1-d68e-4048-a45d-5cd1a50cdafa",Alley
+Hijacksandals/Product,Alto Cove,ALN,"",8,0,4634200,0,4634200,0,6392000,-1757800,"2c11f994-4047-4a8b-89ba-e7169dc25d6e",Alto
+Hijacksandals/Product Reject,Flo Silven RJT,FLSR,"",7,0,4200000,0,4200000,0,5103000,-903000,"0199c2bd-39ea-7a48-bcc3-5fd4195d6313",Flo
+Hijacksandals/Product,Alley Fern,ALF,"",10,0,3562600,0,3562600,0,3790000,-227400,beb276fa-c959-4b6c-9241-6c35d672e818,Alley
+Hijacksandals/Product,Atlas Glen,ATGL,"",5,0,3445000,0,3445000,0,3445000,0,b78911f2-6e65-4018-9702-c8e613775462,Atlas
+Hijacksandals/Product,Atlas Gobi,ATGO,"",5,0,3445000,0,3445000,0,3445000,0,"6511d82a-2823-420e-a150-f4dc90f02a26",Atlas
+Hijacksandals/Product,Atlas Blach,ALBH,"",5,0,3445000,0,3445000,0,3445000,0,fb4cec7e-b799-415e-b0aa-cd5759a536bf,Atlas
+Hijacksandals/Product,Jiro 2.0,JR-NK,"",9,0,3307500,0,3307500,0,4050000,-742500,a01f324e-d275-44c3-875e-19c957b004a7,Jiro
+Shipping/Shipment International,Lion Parcel,LIOP,"",3,0,2962740,0,2962740,0,0,2962740,"019b1084-eb06-7a27-bd02-507bb7a6e86b",Lion
+Hijacksandals/Product,Sonar Blach,MBOB,"",4,0,2871359,0,2871359,0,3156000,-284641,"723daac1-7f07-47e7-8b03-b397a0fc0b2c",Sonar
+Shipping/Shipment Lokal,SAPX,SAPX,"",123,0,2617415,0,2617415,0,0,2617415,"284bef40-e2d5-495c-b523-475f95f1606b",SAPX
+Hijacksandals/Product,Maine Crimson,MNCH,"",3,0,2397000,0,2397000,0,2397000,0,"0198bc59-f154-7cf6-88ca-6911f3c1550a",Maine
+Hijacksandals/Product,Alley Peri,ALP,"",9,0,2387700,0,2387700,0,3411000,-1023300,cc5dcdc9-5fb2-4ea3-99f2-8d5fa0f4e057,Alley
+Hijacksandals/Product,Campbell Vin,CMBV,"",3,0,1661440,0,1661440,0,1947000,-285560,"07b97bfd-0f10-4d65-a801-f45401d852fc",Campbell
+Hijacksandals/Product,Argo Blach,ABM,"",2,0,1518000,0,1518000,0,1518000,0,"6439f1b5-ef91-4e11-a57f-2420cad18ab0",Argo
+Hijacksandals/Product,Bakki Sand,BKS,"",11,0,1417500,0,1417500,0,2079000,-661500,ced93bb7-bad4-4aa5-a889-75cdca2be793,Bakki
+Hijacksandals/Product,Bakki Phthalo,BKP,"",25,0,1360800,0,1360800,0,4725000,-3364200,"3d042126-20d3-4375-acc8-21626b1d7398",Bakki
+Hijacksandals/Product,Kano Blach,KBL,"",2,0,1358300,0,1358300,0,1598000,-239700,"202a6404-51f2-4151-be75-9d1ce91c9e1d",Kano
+Hijacksandals/Product,Alto Blaze,ALT-ORG,"",4,0,1297400,0,1297400,0,1996000,-698600,"55998202-abd6-43ec-888e-df9e713dd330",Alto
+Hijacksandals/Product,Saba Moss,NSG,"",3,0,1222200,0,1222200,0,2037000,-814800,"29e02330-1a80-4a29-b235-8c641071e0f5",Saba
+Hijacksandals/Product,Kano meadow,KM,"",2,0,1198500,0,1198500,0,1598000,-399500,d43ba0ca-2ffa-4006-9616-e30263f0c9bd,Kano
+Hijacksandals/Product,Alto Moor,AN-K,"",3,0,1122750,0,1122750,0,1497000,-374250,"49740be8-1516-45cc-8449-2ce21a98c98b",Alto
+Hijacksandals/Product,Sonar Ether,MBD,"",2,0,946800,0,946800,0,1578000,-631200,"608eaa09-c3d3-4dfc-9ed3-4baf7680ac19",Sonar
+Hijacksandals/Product,Manic Moor,MK-R,"",2,0,943250,0,943250,0,1078000,-134750,"3dd5518e-bb0d-4a4b-a114-fd69072af039",Manic
+Hijacksandals/Product,Alto Blaze Mach-1,ALT-CPL,"",2,0,934700,0,934700,0,1438000,-503300,"171010b0-b5bf-498d-98fd-c0f5fa1d0464",Alto
+Hijacksandals/Product,Mimic Crema,MM-A,"",2,0,916300,0,916300,0,1078000,-161700,"0efec538-090d-44d9-b7fc-45e2d150187c",Mimic
+Hijacksandals/Product,Manic Shell,MCRP,"",1,0,879000,0,879000,0,879000,0,d22b7166-542e-45f7-911c-f101b4e1e069,Manic
+Hijacksandals/Lainnya,OAKEN - Eau De Parfum 50ml - Sanctum,OAK-EDP-003,"",1,0,849000,0,849000,0,849000,0,"269373b0-1807-4880-9b61-ba8c5f30ce16",OAKEN
+Hijacksandals/Product Reject,Campbell Thyme RJT,CATR,"",2,0,800000,0,800000,0,1098000,-298000,"81696a3f-8c60-49f3-b015-1af6c6760e73",Campbell
+Hijacksandals/Product,Mimic Nox (Midnightblue),MNM,"",2,0,754600,0,754600,0,1078000,-323400,"10fe18ba-8fd5-4dc4-b05e-b6f680a468d5",Mimic
+Hijacksandals/Product,Flo Claret,FLOC,"",1,0,729000,0,729000,0,729000,0,"0198eb1a-cd19-7737-a26c-30ef9bc9ad3b",Flo
+Hijacksandals/Product,Mesa Blach,MSBH,"",1,0,649000,0,649000,0,649000,0,"0198bc5f-a206-723e-bd3f-95db7ee0dea0",Mesa
+Hijacksandals/Product,Twyla Meadow,TWYM,"",1,0,649000,0,649000,0,649000,0,e5cfc0f4-1816-4739-9ac7-04b77b8a4a91,Twyla
+Hijacksandals/Product,Celtic Gripp Noir,CGRP,"",1,0,629000,0,629000,0,629000,0,"3141da2a-608c-4d68-b97a-23a319684101",Celtic
+Hijacksandals/Product Reject,Flo Brun RJT,FLBR,"",1,0,600000,0,600000,0,729000,-129000,"0199c2bd-3461-7fea-b216-bc13ea571943",Flo
+Hijacksandals/Product,Umbra Raven,UMB-RVN,"",1,0,571350,0,571350,0,879000,-307650,ee20389d-a187-48ee-8be5-0fb2ada08219,Umbra
+Shipping/Ongkir,JNE REG,,"",26,0,562000,0,562000,0,260000,302000,"38f0f352-747f-40a4-b59f-d844d99096d9",JNE
+Hijacksandals/Product Reject,Flo Blach RJT,IVBR,"",1,0,530000,0,530000,0,629000,-99000,"24bd3a79-8467-40ef-9a2d-9bf61da5f3ee",Flo
+Hijacksandals/Product Reject,New Astro Blach RJT,NABR,"",1,0,500000,0,500000,0,729000,-229000,ead373f3-1dd4-4bd0-acda-ea464cc4b649,New
+Hijacksandals/Product,Tycho Blach,TCB,"",1,0,454350,0,454350,0,699000,-244650,"419cd1c1-0c8b-454b-9a47-79a0cf7d1264",Tycho
+Hijacksandals/Product,Saba Blaze,NSO,"",1,0,407400,0,407400,0,679000,-271600,"450b64a6-601f-4695-aa0a-cf1ffc616e10",Saba
+Hijacksandals/Product,Jiro Nox,JRN,"",1,0,407150,0,407150,0,479000,-71850,"00af925e-b84a-4c10-8531-4490a4481d58",Jiro
+Shipping/Shipment International,RAYSPEED ASIA,,"",1,0,403272,0,403272,0,0,403272,b8227a0b-c5da-4dc8-a95d-ae7cc5d07366,RAYSPEED
+Hijacksandals/Product Reject,Campbell Blach RJT,CABR,"",1,0,400000,0,400000,0,549000,-149000,"5d9a28a5-a117-4e1d-a086-d8badffa9252",Campbell
+Hijacksandals/Product,SIlas Crema,SAM,"",1,0,377400,0,377400,0,629000,-251600,"140119a0-7f69-47c1-9bfc-5be01bcd2377",SIlas
+Hijacksandals/Product Reject,Alto Orca RJT,OG-G,"",1,0,350000,0,350000,0,499000,-149000,"1ec14474-9c24-4179-a1c3-13c61045aa87",Alto
+Hijacksandals/Product,Bakki Blach,BKB,"",2,0,349650,0,349650,0,378000,-28350,"922a07d7-33d0-4437-a185-34e3522f613f",Bakki
+Hijacksandals/Lainnya,Repair - Full,FRN,"",1,0,347500,0,347500,0,0,347500,"2267e1ec-d3eb-4da6-9006-29b7fc1a64f0",Repair
+Hijacksandals/Product,Dach Black,HMH1,"",1,0,309000,0,309000,0,309000,0,"048db1a7-da22-46b0-a74e-31733f8f052a",Dach
+Hijacksandals/Product Reject,Manic Nutmeg RJT,MST-R,"",1,0,300000,0,300000,0,539000,-239000,f9cceaea-2722-446a-b4d6-65dcda8b0245,Manic
+Hijacksandals/Product Reject,Alley mer RJT,AMER,"",1,0,200000,0,200000,0,399000,-199000,cfff7f79-b8b8-4341-8005-3349c6ff1f3a,Alley
+Hijacksandals/Lainnya,OAKEN - Scent Tag - Sanctum,OAK-H-ST,"",1,0,99000,0,99000,0,99000,0,"689eaf08-3128-464c-a1ba-1f3c4dd41999",OAKEN
+Hijacksandals/Merchandise,Piece Goodie Bag Blach,FTBR-BL,"",236,0,0,0,0,0,0,0,"04898617-f0bc-4962-988c-301159fe2573",Piece
+Hijacksandals/Merchandise,Piece Goodie Bag Fuschia,FTBR-FC,"",273,0,0,0,0,0,0,0,a5277ff9-99b6-4e2a-9f93-af1edea4b8ad,Piece

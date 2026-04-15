@@ -1,0 +1,23 @@
+variables:
+  CI_IMAGE: gwanlijanali/hijacksandals-data-ci
+
+default:
+  before_script:
+    - export RSYNC_RSH="sshpass -p $SERVER_PASS ssh -o StrictHostKeyChecking=no"
+
+sync_dags:
+  image: $CI_IMAGE
+  script:
+    - rsync -avz --chmod=D755,F644 --exclude='.git' --exclude='.gitkeep'
+        ./ ${SERVER_USER}@${SERVER_HOST}:${AIRFLOW_PATH}/
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master" && $CI_PIPELINE_SOURCE != "web"'
+
+generate_dags:
+  image: $CI_IMAGE
+  script:
+    - python templates/generate_dags.py
+    - rsync -avz --chmod=D755,F644 --include='gen_*.py' --exclude='*'
+        dags/ ${SERVER_USER}@${SERVER_HOST}:${AIRFLOW_PATH}/dags/
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "web" && $CI_COMMIT_BRANCH == "master"'

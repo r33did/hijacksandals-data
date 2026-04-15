@@ -1,0 +1,55 @@
+name: Airflow DAG Pipeline
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:  # manual trigger (replaces GitLab web trigger)
+
+jobs:
+  sync_dags:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Rsync project to server
+        env:
+          SERVER_PASS: ${{ secrets.SERVER_PASS }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          AIRFLOW_PATH: ${{ secrets.AIRFLOW_PATH }}
+        run: |
+          export RSYNC_RSH="sshpass -p $SERVER_PASS ssh -o StrictHostKeyChecking=no"
+          rsync -avz --chmod=D755,F644 \
+            --exclude='.git' --exclude='.gitkeep' \
+            ./ ${SERVER_USER}@${SERVER_HOST}:${AIRFLOW_PATH}/
+
+  generate_dags:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Generate DAGs from templates
+        run: python template/generate_dags.py
+
+      - name: Rsync generated DAGs to server
+        env:
+          SERVER_PASS: ${{ secrets.SERVER_PASS }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          AIRFLOW_PATH: ${{ secrets.AIRFLOW_PATH }}
+        run: |
+          export RSYNC_RSH="sshpass -p $SERVER_PASS ssh -o StrictHostKeyChecking=no"
+          rsync -avz --chmod=D755,F644 \
+            --include='gen_*.py' --exclude='*' \
+            dags/ ${SERVER_USER}@${SERVER_HOST}:${AIRFLOW_PATH}/dags/

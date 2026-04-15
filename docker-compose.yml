@@ -1,0 +1,170 @@
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      AIRFLOW_VERSION: 2.10.5
+      PYTHON_CONSTRAINT_VERSION: 3.11
+  environment:
+    AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD_URLENCODED}@postgres:5432/${AIRFLOW_DB_NAME}
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${FERNET_KEY:-}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-changeme}
+    AIRFLOW__CORE__DAGS_FOLDER: /app/dags
+    AIRFLOW__LOGGING__BASE_LOG_FOLDER: /app/logs
+    AIRFLOW__HOME: /app/airflow
+    PYTHONPATH: /app
+    ETL_DB_HOST: postgres
+    ETL_DB_PORT: 5432
+    ETL_DB_NAME: ${ETL_DB_NAME}
+    ETL_DB_USER: ${POSTGRES_USER}
+    ETL_DB_PASSWORD: ${POSTGRES_PASSWORD}
+  volumes:
+    - ./dags:/app/dags
+    - ./logs:/app/logs
+    - ./plugins:/app/plugins
+  depends_on:
+    postgres:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+
+  # ─── PostgreSQL ───────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${AIRFLOW_DB_NAME}
+      ETL_DB_NAME: ${ETL_DB_NAME}
+      # GITEA_DB_NAME: ${GITEA_DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── Airflow Init (runs once) ─────────────────────────────────
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    volumes:
+    - ./include:/app/include
+    - ./config:/app/config
+    command: >
+      bash -c "airflow db migrate &&
+      airflow users create
+      --username ${AIRFLOW_ADMIN_USER}
+      --password ${AIRFLOW_ADMIN_PASSWORD}
+      --firstname Admin
+      --lastname User
+      --role Admin
+      --email ${AIRFLOW_ADMIN_EMAIL}"
+    restart: "no"
+
+  # ─── Airflow Webserver ────────────────────────────────────────
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: airflow webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ─── Airflow Scheduler ────────────────────────────────────────
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: airflow scheduler
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "SchedulerJob", "--local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ─── Streamlit ────────────────────────────────────────────────
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        AIRFLOW_VERSION: 2.10.5
+        PYTHON_CONSTRAINT_VERSION: 3.11
+    container_name: streamlit
+    command: streamlit run /app/streamlit/main.py --server.address=0.0.0.0 --server.port=8501
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./streamlit:/app/streamlit
+    environment:
+      ETL_DB_HOST: postgres
+      ETL_DB_PORT: 5432
+      ETL_DB_USER: ${POSTGRES_USER}
+      ETL_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      ETL_DB_NAME: ${ETL_DB_NAME}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${ETL_DB_NAME}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # gitea:
+  #   image: gitea/gitea:latest
+  #   container_name: gitea
+  #   environment:
+  #     - USER_UID=1000
+  #     - USER_GID=1000
+  #     - GITEA__database__DB_TYPE=postgres
+  #     - GITEA__database__HOST=postgres:5432
+  #     - GITEA__database__NAME=${GITEA_DB_NAME}
+  #     - GITEA__database__USER=${POSTGRES_USER}
+  #     - GITEA__database__PASSWD=${POSTGRES_PASSWORD}
+  #   volumes:
+  #     - gitea_data:/data
+  #   ports:
+  #     - "3000:3000"
+  #     - "222:22"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # gitea-runner:              # ← 2 spaces indent, inside services
+  #   image: gitea/act_runner:latest
+  #   container_name: gitea-runner
+  #   environment:
+  #     - GITEA_INSTANCE_URL=http://gitea:3000
+  #     - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_TOKEN}
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - gitea_runner_data:/data
+  #   depends_on:
+  #     - gitea
+  #   restart: unless-stopped
+
+volumes:
+  postgres_data:
+  # gitea_data:
+  # gitea_runner_data:
