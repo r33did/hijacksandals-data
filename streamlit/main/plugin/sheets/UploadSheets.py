@@ -1,0 +1,203 @@
+import os
+import pickle
+import re
+import webbrowser
+from datetime import datetime
+from pathlib import Path
+
+import gspread
+from dotenv import load_dotenv
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from gspread_dataframe import set_with_dataframe
+
+BASE_DIR = Path(__file__).resolve()
+ROOT_DIR = BASE_DIR.parents[3]
+ENV_PATH = ROOT_DIR / ".env"
+
+load_dotenv(ENV_PATH)
+
+TOKEN_PATH = os.path.join(ROOT_DIR, os.getenv("PICKLE_CRED"))
+CLIENT_SECRET = os.path.join(ROOT_DIR, os.getenv("OAUTH"))
+
+main_id = os.getenv("GDRIVE_ID")
+template_id = os.getenv("TEMPLATE_ID")
+scope = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+
+def create_new_creds():
+    creds = None
+
+    if os.path.exists(TOKEN_PATH):
+        with open(TOKEN_PATH, "rb") as token_file:
+            creds = pickle.load(token_file)
+
+    if not creds or not creds.valid:
+        try:
+            creds.refresh(Request())
+        except Exception:
+            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, scope)
+            creds = flow.run_local_server(port=0)
+
+        with open(TOKEN_PATH, "wb") as token_file:
+            pickle.dump(creds, token_file)
+
+    return creds
+
+
+def load_oauth_creds():
+    if not os.path.exists(TOKEN_PATH):
+        return create_new_creds()
+
+    with open(TOKEN_PATH, "rb") as token_file:
+        try:
+            return pickle.load(token_file)
+        except Exception:
+            return create_new_creds()
+
+
+oauth = load_oauth_creds()
+
+
+class sheetdrive:
+    def __init__(self):
+        self.creds = oauth
+        self.main_id = main_id
+        self.template_id = template_id
+
+    def set_main_id(self, folder_id: str):
+        if folder_id:
+            self.main_id = folder_id.strip()
+        return self.main_id
+
+    def service(self):
+        return build("drive", "v3", credentials=self.creds)
+
+    def connect_gspread(self):
+        return gspread.authorize(self.creds)
+
+    def search_filename(self, file_name: str, folder_id: str):
+        driver_service = self.service()
+        list_file = driver_service.files().list(
+            q=f"'{folder_id}' in parents",
+            fields="files(name,id,mimeType)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute()
+        regex_filename = f".*{file_name}.*"
+
+        for file_item in list_file["files"]:
+            if re.search(regex_filename, file_item["name"]):
+                return file_item["id"]
+
+    def copy_template(self, file_name: str, new_title: str):
+        drive_service = self.service()
+        file_metadata = {"name": new_title, "parents": [self.template_id]}
+        file_id = self.search_filename(file_name=file_name, folder_id=self.template_id)
+
+        copied_file = drive_service.files().copy(
+            fileId=file_id,
+            body=file_metadata,
+            supportsAllDrives=True,
+        ).execute()
+
+        return copied_file.get("id")
+
+    def upload_new_gsheet(self, dataframe, spreadsheet_name=None, open_browser=True):
+        if not spreadsheet_name:
+            spreadsheet_name = f"Extract_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        client = gspread.authorize(self.creds)
+        drive_service = self.service()
+
+        file_metadata = {
+            "name": spreadsheet_name,
+            "mimeType": "application/vnd.google-apps.spreadsheet",
+            "parents": [self.main_id],
+        }
+
+        file = drive_service.files().create(body=file_metadata, fields="id").execute()
+        sheet_id = file.get("id")
+        spreadsheet = client.open_by_key(sheet_id)
+
+        spreadsheet.share(None, perm_type="anyone", role="writer")
+
+        worksheet = spreadsheet.sheet1
+        set_with_dataframe(worksheet, dataframe)
+
+        if open_browser:
+            webbrowser.open(spreadsheet.url)
+
+        return spreadsheet.url
+
+    def update_gsheet(
+        self,
+        file_name: str = None,
+        dataframe=None,
+        sheet_name="Main_Data",
+        overwrite=False,
+        spreadsheet_id: str = None,
+        open_browser=True,
+    ):
+        file_id = spreadsheet_id
+        if not file_id:
+            file_id = self.search_filename(file_name=file_name, folder_id=self.main_id)
+        if not file_id:
+            raise ValueError("Spreadsheet target could not be found.")
+
+        client = gspread.authorize(self.creds)
+        spreadsheet = client.open_by_key(file_id)
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(
+                title=sheet_name,
+                rows="1000",
+                cols="20",
+            )
+
+        if overwrite:
+            worksheet.clear()
+
+        set_with_dataframe(worksheet, dataframe)
+
+        if open_browser:
+            webbrowser.open(spreadsheet.url)
+
+        return spreadsheet.url
+
+    def list_folder(self, folder_id=None, include=".*report.*"):
+        if folder_id is None:
+            folder_id = self.main_id
+        drive_service = self.service()
+        res = drive_service.files().list(
+            q=f"'{folder_id}' in parents",
+            fields="files(name,id,mimeType)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute()
+        list_file = res.get("files", [])
+        list_final_file = []
+        for file_item in list_file:
+            if re.search(include, file_item["name"].lower()) and re.search("spreadsheet", file_item["mimeType"]):
+                list_final_file.append((file_item["name"], file_item["id"]))
+        return list_final_file
+
+    def get_or_create_sheet(self, spreadsheet_id: str, sheet_name: str):
+        client = self.connect_gspread()
+        spreadsheet = client.open_by_key(spreadsheet_id)
+
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            worksheet = spreadsheet.add_worksheet(
+                title=sheet_name,
+                rows="1000",
+                cols="20",
+            )
+
+        return worksheet

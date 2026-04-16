@@ -1,0 +1,275 @@
+import streamlit as st
+import os
+from typing import List, Dict, Optional, Any
+from dotenv import load_dotenv 
+import datetime
+import pandas as pd
+from plugin.postgre.QueryBuilder import Engine,ReadTemplate
+from plugin.sheets.UploadSheets import sheetdrive
+import yaml
+from pathlib import Path
+
+
+load_dotenv()
+engine = Engine()
+sheetdrive = sheetdrive()
+client = sheetdrive.connect_gspread()
+templatequery = ReadTemplate()
+
+BASE_DIR = Path(__file__).resolve() # Resolve Where you are 
+ROOT_DIR = BASE_DIR.parents[3]
+
+
+def new_process_config(process_id: int) -> dict[str, Any]:
+    """Create one empty source config block for the input_map builder."""
+    return {
+        "process_id": process_id,
+        "process_detail" : []
+    }
+
+@st.cache_data(ttl=300)
+def get_report_list():
+    return dict(sheetdrive.list_folder())
+
+@st.cache_data(ttl=300)
+def get_tables():
+    return engine.get_all_tables()
+
+def init_session_state():
+    """Initialize all session state variables with a clean slate."""
+    defaults = {
+        "process": [new_process_config(1)],
+        "spreadsheet_target":None,
+        "update_existing":True,
+        "report_id":None,
+        "get_metod":False,
+        "report_id_tab2":None,
+        "get_metod_tab2":False,
+        "next_source_id": 2,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+    normalize_sources_state()
+
+def normalize_sources_state() -> None :
+    """Backfill any new source fields so older session state keeps working."""
+    normalized_processs: list[dict[str, Any]] = []
+    used_ids: list[int] = []
+
+    for index, process in enumerate(st.session_state.process, start=1):
+        process_id = int(process.get("process_id") or index)
+        process_detail = process.get("process_detail") or {}
+        used_ids.append(process_id)
+
+        if not process_detail :
+            RuntimeError("Error while dubunking process_detail")
+
+        normalized_processs.append(
+            {
+                "process_id": process_id, 
+                "spreadsheet": split_lines(process_detail.get("spreadsheet", [])),
+                "sheet_name": split_lines(process_detail.get("sheet", [])), 
+                "query": split_lines(process_detail.get("query", [])),
+                "data": split_lines(process_detail.get("data", pd.DataFrame())) 
+            }
+        )
+    
+    st.session_state.process = normalized_processs
+
+    next_process_id = max(used_ids, default=0) + 1
+    if st.session_state.next_source_id < next_process_id:
+        st.session_state.next_source_id = next_process_id
+
+
+def split_lines(raw_text: str | list[str] | tuple[str, ...]) -> list[str]:
+    """Normalize textarea or multiselect values into a clean list of strings."""
+    if raw_text is None:
+        return []
+    
+def time_to_cron(
+    minute: int = 0,
+    hour: int = 0,
+    day_of_month: str = "*",
+    month: str = "*",
+    day_of_week: str = "*"
+) -> str:
+    """
+    Flexible cron builder
+    """
+    return f"{minute} {hour} {day_of_month} {month} {day_of_week}"
+    
+def restart_streamlit():
+    st.rerun()
+
+def report_manage():
+    tables = get_tables()
+    gdrive_sheet = get_report_list()
+
+    st.title("Report Manager")
+
+    init_session_state()
+
+    # st.toggle("Update Existing",key="update_existing")
+
+    refresh_tab, setschadule_tab = st.tabs(["Refresh Data","Set Schadule"])
+
+    # if st.session_state.update_existing:
+    with refresh_tab:
+        st.markdown("Update Targeted Spreadsheet with Template Data")
+        col1, col2 = st.columns([1,1])
+        with col1 : 
+            if st.session_state.get_metod:
+                input_sheet_name = st.text_input(label="Input Report Url",placeholder="https://docs.google.com/spreadsheets/d/{ID HERE}/edit?gid=0#gid=0") 
+                if input_sheet_name :
+                    st.session_state.report_id = [input_sheet_name.split('/')[idx+1] for idx,x in enumerate(input_sheet_name.split('/')) if x == 'd' ][0]
+            else :
+                choose_sheet_name = st.selectbox("Select Report",options=gdrive_sheet.keys(),key="insert_url_tab")
+                st.session_state.report_id = gdrive_sheet[choose_sheet_name]
+                
+        with col2 :
+            st.write("") # Untuk Nengahin aja
+            st.write("")
+            st.toggle("Pilih Metode",key="get_metod",help='Click unutk input URL Spreadsheet')
+
+        if st.button("Start Update",type="primary") :
+            log_area = st.container()
+            
+            spreadsheet = client.open_by_key(st.session_state.report_id)
+
+            metadata_sheets = [ x['properties'] for x in spreadsheet.fetch_sheet_metadata()['sheets'] ]
+            st.session_state.spreadsheet_target = spreadsheet.fetch_sheet_metadata()['properties']['title']
+            
+            UPDATE_TARGET = []
+            for x in metadata_sheets :
+                TEMPLATE_QUERY = templatequery.get_query(template_name=x['title'])
+                if TEMPLATE_QUERY:
+                    target = {
+                        "spreadsheet": spreadsheet.title, 
+                        "sheet":x['title'],
+                        "query":TEMPLATE_QUERY
+                    }
+                    UPDATE_TARGET.append(target)
+
+            if not UPDATE_TARGET:
+                st.error("Sheet Name Should Be The Same as Trageted Template")
+                st.rerun()
+            
+            if UPDATE_TARGET :
+               for process in UPDATE_TARGET:     
+                    data = engine.execute_query(process.get('query'),params=None)
+                    sheetdrive.update_gsheet(
+                        file_name=process.get('spreadsheet'),
+                        dataframe=data, 
+                        sheet_name=process.get('sheet'),
+                        overwrite=True
+                        )
+                    
+                    # st.caption("Here are preview of data you update")
+                    # st.dataframe(data.head(50), use_container_width=True)
+
+            
+            # log_area.write(f"Report ID: {st.session_state.report_id}")
+            # log_area.write(f"Report Name: {spreadsheet.title}")
+            # log_area.write(f"Report sheetname: {spreadsheet.sheet1.title}")
+        
+    
+                    st.markdown(f"**Updated Preview {st.session_state.spreadsheet_target}**")
+                    previewable_sources = [
+                        source for source in st.session_state.process if source.get("query", None)
+                    ]
+                    
+                    if not previewable_sources:
+                        st.info("Belum ada process table yang bisa dipreview.")
+                    else:
+                        preview_tabs = st.tabs(
+                            [
+                                str(source.get("sheet")).strip() or f"Source #{index + 1}"
+                                for index, source in enumerate(previewable_sources)
+                            ]
+                        )
+
+                        for tab, process in zip(preview_tabs, st.session_state.process):
+                            with tab:
+                                try:
+                                    st.markdown(f"Result of process {process.get('process_id')} to {process.get('sheet_name') or '***Unreadable***'}")
+                                    if process.get("data"):
+                                        st.dataframe(process.get("data").head(20))
+                                    else : 
+                                        st.markdown(f"Data preview unavailable/please check if template available")
+                                    with st.expander("Show Generated SQL"):
+                                        st.code(
+                                            f"Generated Query:\n{process.get('query')}",
+                                            language="sql"
+                                        )
+
+                                except Exception as exc:
+                                    st.info(f"Preview source belum valid: {exc}")
+    with setschadule_tab: 
+        st.markdown("Setup Schadule Update for Certain Sheet")
+        col1, col2 = st.columns([1,1])
+        with col1 : 
+            if st.session_state.get_metod_tab2:
+                input_sheet_name = st.text_input(label="Input Report Url",placeholder="https://docs.google.com/spreadsheets/d/{ID HERE}/edit?gid=0#gid=0") 
+                if input_sheet_name :
+                    st.session_state.report_id_tab2 = [input_sheet_name.split('/')[idx+1] for idx,x in enumerate(input_sheet_name.split('/')) if x == 'd' ][0]
+            else :
+                choose_sheet_name_tab2 = st.selectbox("Select Report",options=gdrive_sheet.keys(),key="insert_url_tab2")
+                
+        with col2 :
+            st.write("") # Untuk Nengahin aja
+            st.write("")
+            st.toggle("Pilih Metode",key="get_metod_tab2",help='Click unutk input URL Spreadsheet')
+        
+        select_template_table = st.selectbox(
+           "Select Template", options=[""]+templatequery.list_templates(), key="selected_template",placeholder="Template will be shown below"
+        )
+        
+        time_picker = st.time_input("Set Time for Data Refresh", datetime.time(9, 00),key="schadule_time")
+        if "cron_time" not in st.session_state:
+            st.session_state["cron_time"] = time_to_cron(minute= st.session_state.schadule_time.minute, hour= st.session_state.schadule_time.hour)
+        st.markdown(f"Schadule set on every `{str(st.session_state.schadule_time)}` or `{st.session_state.cron_time}`")
+
+        if st.session_state.selected_template :
+            if "set_schaduler_query" not in st.session_state:
+                st.session_state["set_schaduler_query"] = f"""{str(templatequery.get_query(st.session_state.selected_template)).replace(';','')} \n LIMIT 20;"""
+
+            st.markdown("***Data shown limited for 20 rows***")
+            st.dataframe(
+                engine.execute_query(
+                    st.session_state.set_schaduler_query
+                    ,params=None
+                )
+            )
+            with st.expander("Show Generated SQL"):
+                st.code(
+                    st.session_state.set_schaduler_query,
+                    language="sql"  
+                )
+
+        if st.button("Generate & Set Schadule",type='primary'):
+            spreadsheet = client.open_by_key(st.session_state.report_id_tab2)
+            metadata_sheets = spreadsheet.fetch_sheet_metadata()['properties'] 
+            st.spinner(f"In Progress Generate {metadata_sheets['title']}",show_time=True)
+
+            worksheet = sheetdrive.get_or_create_sheet(
+                spreadsheet_id=st.session_state.report_id_tab2,
+                sheet_name=st.session_state.selected_template)
+
+            data = engine.execute_query(templatequery.get_query(st.session_state.selected_template),params=None)
+            sheetdrive.update_gsheet(
+                file_name=metadata_sheets['title'],
+                dataframe=data, 
+                sheet_name=st.session_state.selected_template,
+                overwrite=True
+                )
+            
+
+
+
+
+        
+
+if __name__ == "__main__":
+    report_manage()

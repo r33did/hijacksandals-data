@@ -1,0 +1,222 @@
+from dotenv import load_dotenv
+import os
+from pathlib import Path
+from datetime import datetime
+import gspread
+from googleapiclient.discovery import build
+from oauth2client.service_account import ServiceAccountCredentials
+from gspread_dataframe import set_with_dataframe
+import webbrowser
+import pickle
+import re
+import yaml
+
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+
+load_dotenv()
+
+BASE_DIR = Path(__file__).resolve() # Resolve Where you are 
+ROOT_DIR = BASE_DIR.parents[3] # Angka diambil dari urutan folder/file
+
+TOKEN_PATH = os.path.join(ROOT_DIR, os.getenv("PICKLE_CRED"))
+CLIENT_SECRET = os.path.join(ROOT_DIR, os.getenv("OAUTH"))
+TEMPLATE_PATH = os.path.join(ROOT_DIR, os.getenv("TEMPLATE_QUERY"))
+
+main_id = os.getenv("GDRIVE_ID")
+template_id = os.getenv("TEMPLATE_ID")
+scope = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# DEBUG
+print(f"Base Directory: {BASE_DIR}")
+print(f"Token Path: {TOKEN_PATH}")
+
+def create_new_creds():
+    creds = None
+
+    # load token kalau sudah pernah login
+    if os.path.exists(TOKEN_PATH):
+        with open(TOKEN_PATH, "rb") as token:
+            creds = pickle.load(token)
+
+    # kalau belum login / expired
+    if not creds or not creds.valid:
+        # if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+        # else:
+        except:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CLIENT_SECRET, scope
+            )
+            creds = flow.run_local_server(port=0)
+
+        # simpan token
+        with open(TOKEN_PATH, "wb") as token:
+            pickle.dump(creds, token)
+
+    return creds
+
+
+with open(TOKEN_PATH, "rb") as token:
+    try:
+        oauth = pickle.load(token)
+    except: 
+        create_new_creds()
+
+class sheetdrive():
+    def __init__(self):
+        self.creds = oauth
+        self.main_id = main_id
+        self.template_id = template_id
+
+    
+    def service(self):
+        '''
+        Call to Create Service Build Drive V3
+        '''
+        return build("drive", "v3", credentials=self.creds)
+
+    def connect_gspread(self):
+        '''
+        Connect to Google Sheets
+        '''
+        return gspread.authorize(self.creds)
+
+    def search_filename(self, file_name:str, folder_id:str):
+        '''
+        Search File Name in Folder
+        file_name : File Name to Search
+        folder_id : Folder ID to Search
+        '''
+        driver_service = self.service()
+
+        list_file = driver_service.files().list(q=f"'{folder_id}' in parents", fields="files(name,id,mimeType)",supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+        regex_filename = f".*{file_name}.*"
+
+        for f in list_file["files"]:
+            if re.search(regex_filename,f['name']):
+                return f['id']
+         
+
+    def copy_template(self,file_name:str,new_title:str):
+        '''
+        Copy From Template Folder to Main Folder
+        file_name : Source File Name
+        new_title : Copied File Name
+        '''
+        drive_service = self.service()
+        
+        # File metadata for the new copy
+        file_metadata = {'name': new_title}
+        if file_metadata:
+            # Specify the new parent folder ID
+            file_metadata['parents'] = [self.template_id]
+
+        file_id = self.search_filename(file_name=file_name, folder_id=self.template_id)
+
+        # Call the files().copy() method
+        copied_file = drive_service.files().copy(
+            fileId=file_id,
+            body=file_metadata,
+            supportsAllDrives=True # Required for Shared Drives
+        ).execute()
+        
+        return copied_file.get("id")
+
+    def upload_new_gsheet(self, dataframe, spreadsheet_name=None):
+        '''
+        Upload New GSheet
+        dataframe : Dataframe to Upload
+        spreadsheet_name : Spreadsheet Name
+        '''
+        if not spreadsheet_name :
+            spreadsheet_name = f"Extract_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        client = gspread.authorize(self.creds)
+        drive_service = self.service()
+
+        file_metadata = {
+            "name": spreadsheet_name,
+            "mimeType": "application/vnd.google-apps.spreadsheet",
+            "parents": [self.main_id]  # 🔥 langsung ke folder tujuan
+        }
+
+        file = drive_service.files().create(
+            body=file_metadata,
+            fields="id"
+        ).execute()
+
+        sheet_id = file.get("id")
+
+        # Open with gspread
+        spreadsheet = client.open_by_key(sheet_id)
+
+        # Set permission: anyone with link can view
+        spreadsheet.share(
+            None,
+            perm_type="anyone",
+            role="writer"
+        )        
+
+        sheet_id = spreadsheet.id
+
+        # Upload dataframe
+        worksheet = spreadsheet.sheet1
+        set_with_dataframe(worksheet, dataframe)
+
+        webbrowser.open(spreadsheet.url)
+
+    def update_gsheet(self,file_name:str,dataframe=None,sheet_name="Main_Data",overwrite=False):
+        '''
+        Update GSheet
+        file_name : File Name to Update
+        dataframe : Dataframe to Update
+        '''
+        file_id = self.search_filename(file_name=file_name, folder_id=self.main_id)
+        
+        # Open with gspread
+        client = gspread.authorize(self.creds)
+        spreadsheet = client.open_by_key(file_id) 
+        worksheet = spreadsheet.worksheet(sheet_name)
+
+        if overwrite == True :
+            worksheet.clear()
+
+        set_with_dataframe(worksheet, dataframe)
+        webbrowser.open(spreadsheet.url)
+    
+    def list_folder(self,folder_id=None, include='.*report.*'):
+        """
+        List Folder
+        folder_id : Folder ID to List
+        include : str Regex to Include
+        """
+        if folder_id is None:
+            folder_id = self.main_id
+        drive_service = self.service()
+        res = drive_service.files().list(q=f"'{folder_id}' in parents", fields="files(name,id,mimeType)",supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+        list_file = res.get('files',[])
+        list_final_file = []
+        for x in list_file:
+            if re.search(include,x['name'].lower()) and re.search('spreadsheet',x['mimeType']):
+                list_final_file.append((x['name'],x['id']))
+        return list_final_file
+    
+    def get_or_create_sheet(self, spreadsheet_id: str, sheet_name: str):
+        client = self.connect_gspread()
+        spreadsheet = client.open_by_key(spreadsheet_id)
+         
+        try:
+            worksheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound: #Workaround kalau fail
+            worksheet = spreadsheet.add_worksheet(
+                title=sheet_name,
+                rows="1000",
+                cols="20"
+            )
+
+        return worksheet

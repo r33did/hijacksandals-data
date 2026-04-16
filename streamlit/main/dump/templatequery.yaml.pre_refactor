@@ -1,0 +1,14 @@
+# config.yaml
+reportproduct: |
+    SELECT
+        a."Outlet",
+        to_date(a."Date",'YYYY-MM') AS month,
+        SUM(a."Quantity") AS TotalSold
+    FROM testing.dealpos_transfer_orders a
+    GROUP BY 
+        a."Outlet",
+        to_date(a."Date",'YYYY-MM');
+
+template2: "SELECT * FROM dm_dissnuts"
+template3: "SELECT * FROM dm_dissnuts"
+"{TEMPLATE}": "{QUERY}"

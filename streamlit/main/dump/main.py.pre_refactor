@@ -1,0 +1,106 @@
+
+
+import streamlit as st
+import os
+import datetime
+from pathlib import Path
+
+st.set_page_config(page_title='Hijack Data', layout='wide', page_icon='🩴')
+BASE_DIR = Path.cwd()
+
+# DEBUG
+print(f"Base Directory: {BASE_DIR}")
+
+# Dynamically construct path to the image
+logo_path = os.path.join(BASE_DIR, 'img', 'Logo.png')
+
+# Import
+from ExtractPage import extract_page
+from ReportManagerPage import report_manage 
+
+print(f"Logo Path: {logo_path}")
+
+ALL_PAGES = ["Home", "Data Extractor", "Report Generator & Refresher", "Dashboard","Analyze"]
+USR_PAGES = [x for x in ALL_PAGES if x not in ["Dashboard","Analyze"]]
+
+# User credentials and role-based access
+USERS = {
+    "admin": {"password": "admin123", "pages": ALL_PAGES},
+    "user1": {"password": "user123", "pages": USR_PAGES},
+    "user2": {"password": "user223", "pages": USR_PAGES}
+}
+
+def login():
+    st.title("🔐 Login")
+    with st.form("login_form"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login")
+        
+        if submit:
+            if username in USERS and USERS[username]["password"] == password:
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.session_state.role_pages = USERS[username]["pages"]
+                st.session_state.page = "Home"
+                st.query_params["user"] = username # Save to query params for persistence
+                st.success("Login successful!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password")
+
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+
+# Auto-login if user in query_params
+if not st.session_state.logged_in and "user" in st.query_params:
+    user_param = st.query_params["user"]
+    if user_param in USERS:
+        st.session_state.logged_in = True
+        st.session_state.username = user_param
+        st.session_state.role_pages = USERS[user_param]["pages"]
+        st.session_state.page = "Home"
+
+if not st.session_state.logged_in:
+    login()
+else:
+    # Sidebar navigation for logged-in users
+    with st.sidebar:
+        col1, col2, col3 = st.columns([1, 50, 1])
+        with col2:
+            st.image(logo_path, width=200, use_container_width=True)
+        
+        st.markdown("<h2 style='text-align: center;'>🧭Navigation</h2>", unsafe_allow_html=True)
+        
+        # Filter pages based on user role
+        allowed_pages = st.session_state.role_pages
+        for page in allowed_pages:
+            if st.button(page, key=f"nav_{page}", use_container_width=True, type="primary" if st.session_state.page == page else "tertiary"):
+                st.session_state.page = page
+                st.rerun()
+        
+        st.markdown("---")
+        st.write(f"Logged in as: **{st.session_state.username}**")
+        if st.button("Logout", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.page = "Home"
+            # Clear query params on logout
+            st.query_params.clear()
+            st.rerun()
+
+    selection = st.session_state.page if 'page' in st.session_state else "Home"
+
+    if selection == "Home":
+        st.title("🏠 Home")
+        st.write(f"Welcome, **{st.session_state.username}**!")
+        st.write("Use the sidebar buttons to navigate to your authorized pages.")
+
+    elif selection == "Data Extractor":
+        extract_page()
+    elif selection == "Report Generator & Refresher":
+        # st.title("Report Generator & Refresher")
+        report_manage()
+    elif selection == "Dashboard":
+        st.title("Dashboard")
+    elif selection == "Analyze":
+        st.title("Analyze")

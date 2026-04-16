@@ -1,0 +1,14 @@
+reportproduct:
+  description: Monthly product transfer summary by outlet and month.
+  query: "SELECT\n    a.\"Outlet\",\n    to_date(a.\"Date\",'YYYY-MM') AS month,\n\
+    \    SUM(a.\"Quantity\") AS TotalSold\nFROM testing.dealpos_transfer_orders a\n\
+    GROUP BY \n    a.\"Outlet\",\n    to_date(a.\"Date\",'YYYY-MM');\n"
+template2:
+  description: Full extract from dm_dissnuts for general reporting.
+  query: SELECT * FROM dm_dissnuts
+template3:
+  description: Alternative full extract from dm_dissnuts.
+  query: SELECT * FROM dm_dissnuts
+'{TEMPLATE}':
+  description: Example placeholder for adding new templates.
+  query: '{QUERY}'

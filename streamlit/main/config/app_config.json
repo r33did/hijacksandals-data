@@ -1,0 +1,34 @@
+{
+  "google_drive": {
+    "main_id": "1BpsNx4VSl1O19rsJ2WEPb06YUlK-E23D"
+  },
+  "users": {
+    "admin": {
+      "password": "admin123",
+      "pages": [
+        "Home",
+        "Data Extractor",
+        "Report Generator & Refresher",
+        "Dashboard",
+        "Analyze",
+        "Config"
+      ]
+    },
+    "user1": {
+      "password": "user123",
+      "pages": [
+        "Home",
+        "Data Extractor",
+        "Report Generator & Refresher"
+      ]
+    },
+    "user2": {
+      "password": "user223",
+      "pages": [
+        "Home",
+        "Data Extractor",
+        "Report Generator & Refresher"
+      ]
+    }
+  }
+}
