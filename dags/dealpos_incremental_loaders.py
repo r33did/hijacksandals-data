@@ -17,6 +17,18 @@ HOURLY_SCHEDULE = "0 * * * *"
 FACT_LOOKBACK_DAYS = 1
 
 
+def get_fact_loader_keys():
+    if hasattr(etl, "FACT_DAG_LOADER_KEYS"):
+        return etl.FACT_DAG_LOADER_KEYS
+
+    return [
+        loader_key
+        for loader_key, loader_config in etl.LOADER_CONFIGS.items()
+        if loader_key.startswith("fact_")
+        or loader_config.get("supports_incremental_window", False)
+    ]
+
+
 def run_incremental_loader(loader_key, **context):
     loader_config = etl.LOADER_CONFIGS[loader_key]
     start_date = None
@@ -30,7 +42,7 @@ def run_incremental_loader(loader_key, **context):
 
     etl.run_loader(loader_key, start_date=start_date, end_date=end_date)
 
-for loader_key in etl.FACT_DAG_LOADER_KEYS:
+for loader_key in get_fact_loader_keys():
     loader_config = etl.LOADER_CONFIGS[loader_key]
     dag_id = f"dealpos_{loader_key}_hourly"
 
