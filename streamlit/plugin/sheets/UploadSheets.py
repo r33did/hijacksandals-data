@@ -84,7 +84,7 @@ def create_new_creds():
             scope
         )
 
-        creds = flow.run_console()  # 🔥 better for Docker
+        creds = flow.run_local_server(port=0, open_browser=False)  # 🔥 better for Docker
 
     # Save token
     TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
