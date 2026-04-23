@@ -9,6 +9,7 @@ import gspread
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from gspread_dataframe import set_with_dataframe
 
@@ -53,6 +54,7 @@ def resolve_env_path(env_key: str) -> Path:
 
 TOKEN_PATH = resolve_env_path("PICKLE_CRED")
 CLIENT_SECRET = resolve_env_path("OAUTH")
+SERVICE_ACCOUNT = resolve_env_path("CREDS")
 
 main_id = os.getenv("GDRIVE_ID")
 template_id = os.getenv("TEMPLATE_ID")
@@ -83,8 +85,11 @@ def create_new_creds():
             str(CLIENT_SECRET),
             scope
         )
-
-        creds = flow.run_local_server(port=0, open_browser=False)  # 🔥 better for Docker
+        
+        try : 
+            creds = flow.run_console() # 🔥 better for Docker
+        except : 
+            creds = flow.run_local_server(port=0, open_browser=False)  
 
     # Save token
     TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -111,6 +116,13 @@ def load_oauth_creds():
     except Exception as e:
         print(f"Token load failed: {e}")
         return create_new_creds()
+    
+def call_service():
+    creds = Credentials.from_service_account_file(
+    str(SERVICE_ACCOUNT),
+    scopes=["https://www.googleapis.com/auth/spreadsheets"])
+
+    return creds
 
 #--------
 # Testing Dengan Cara lain 
@@ -150,7 +162,7 @@ def load_oauth_creds():
 
 class sheetdrive:
     def __init__(self):
-        self.creds = load_oauth_creds()
+        self.creds = call_service()
         self.main_id = main_id
         self.template_id = template_id
 
