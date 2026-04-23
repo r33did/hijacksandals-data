@@ -16,12 +16,23 @@ default_args = {
 HOURLY_SCHEDULE = "0 0 * * *"
 
 
+def get_dimension_loader_keys():
+    if hasattr(etl, "DIMENSION_DAG_LOADER_KEYS"):
+        return etl.DIMENSION_DAG_LOADER_KEYS
+
+    return [
+        loader_key
+        for loader_key in etl.LOADER_CONFIGS
+        if not loader_key.startswith("fact_")
+    ]
+
+
 def run_dimension_loader(loader_key, **context):
     del context
     etl.run_loader(loader_key)
 
 
-for loader_key in etl.DIMENSION_DAG_LOADER_KEYS:
+for loader_key in get_dimension_loader_keys():
     loader_config = etl.LOADER_CONFIGS[loader_key]
     dag_id = f"dealpos_{loader_key}_hourly"
 
