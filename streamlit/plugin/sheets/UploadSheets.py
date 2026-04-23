@@ -120,7 +120,7 @@ def load_oauth_creds():
 def call_service():
     creds = Credentials.from_service_account_file(
     str(SERVICE_ACCOUNT),
-    scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    scopes=scope)
 
     return creds
 
