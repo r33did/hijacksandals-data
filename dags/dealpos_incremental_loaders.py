@@ -30,7 +30,7 @@ def run_incremental_loader(loader_key, **context):
 
     etl.run_loader(loader_key, start_date=start_date, end_date=end_date)
 
-for loader_key in etl.HOURLY_DAG_LOADER_KEYS:
+for loader_key in etl.FACT_DAG_LOADER_KEYS:
     loader_config = etl.LOADER_CONFIGS[loader_key]
     dag_id = f"dealpos_{loader_key}_hourly"
 

@@ -784,7 +784,7 @@ LOADER_CONFIGS = {
     },
 }
 
-HOURLY_DAG_LOADER_KEYS = [
+DIMENSION_DAG_LOADER_KEYS = [
     "outlets",
     "categories",
     "customers",
@@ -794,11 +794,16 @@ HOURLY_DAG_LOADER_KEYS = [
     "payment_methods",
     "taxes",
     "users",
+]
+
+FACT_DAG_LOADER_KEYS = [
     "fact_invoice",
     "fact_invoice_line",
     "fact_invoice_return",
     "fact_inventory",
 ]
+
+HOURLY_DAG_LOADER_KEYS = DIMENSION_DAG_LOADER_KEYS + FACT_DAG_LOADER_KEYS
 
 
 def run_loader(loader_key, start_date=None, end_date=None):
