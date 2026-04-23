@@ -1,0 +1,14 @@
+[theme]
+base="light"
+
+# Biru tua (utama untuk button, highlight)
+primaryColor="#1E3A8A"  # navy blue
+
+# Background utama (putih bersih)
+backgroundColor="#FFFFFF"
+
+# Dibikin sedikit lebih gelap & ada hint biru
+secondaryBackgroundColor="#CBD5E1"
+
+# Warna teks utama
+textColor="#0F172A"  # dark blue-black (lebih soft dari pure black)

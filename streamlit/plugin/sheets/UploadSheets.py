@@ -66,19 +66,30 @@ def create_new_creds():
     creds = None
 
     if TOKEN_PATH.exists():
-        with open(TOKEN_PATH, "rb") as token_file:
-            creds = pickle.load(token_file)
+        with open(TOKEN_PATH, "rb") as f:
+            creds = pickle.load(f)
 
-    if not creds or not creds.valid:
+    # Refresh if possible
+    if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-        except Exception:
-            flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRET), scope)
-            creds = flow.run_local_server(port=0, open_browser=False)
+        except Exception as e:
+            print(f"Refresh failed: {e}")
+            creds = None
 
-        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(TOKEN_PATH, "wb") as token_file:
-            pickle.dump(creds, token_file)
+    # If no valid creds, start OAuth flow
+    if not creds or not creds.valid:
+        flow = InstalledAppFlow.from_client_secrets_file(
+            str(CLIENT_SECRET),
+            scope
+        )
+
+        creds = flow.run_console()  # 🔥 better for Docker
+
+    # Save token
+    TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(TOKEN_PATH, "wb") as f:
+        pickle.dump(creds, f)
 
     return creds
 
@@ -87,19 +98,59 @@ def load_oauth_creds():
     if not TOKEN_PATH.exists():
         return create_new_creds()
 
-    with open(TOKEN_PATH, "rb") as token_file:
-        try:
-            return pickle.load(token_file)
-        except Exception:
+    try:
+        with open(TOKEN_PATH, "rb") as f:
+            creds = pickle.load(f)
+
+        # validate before returning
+        if not creds or not creds.valid:
             return create_new_creds()
 
+        return creds
 
-oauth = load_oauth_creds()
+    except Exception as e:
+        print(f"Token load failed: {e}")
+        return create_new_creds()
+
+#--------
+# Testing Dengan Cara lain 
+#--------
+
+# def create_new_creds():
+#     creds = None
+
+#     if TOKEN_PATH.exists():
+#         with open(TOKEN_PATH, "rb") as token_file:
+#             creds = pickle.load(token_file)
+
+#     if not creds or not creds.valid:
+#         try:
+#             creds.refresh(Request())
+#         except Exception:
+#             flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRET), scope)
+#             creds = flow.run_local_server(port=0, open_browser=False)
+
+#         TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+#         with open(TOKEN_PATH, "wb") as token_file:
+#             pickle.dump(creds, token_file)
+
+#     return creds
+
+
+# def load_oauth_creds():
+#     try : 
+#         if not TOKEN_PATH.exists():
+#             return create_new_creds()
+#     except Exception:
+#         with open(TOKEN_PATH, "rb") as token_file:
+#                 return pickle.load(token_file)
+#     else : 
+#         return create_new_creds()
 
 
 class sheetdrive:
     def __init__(self):
-        self.creds = oauth
+        self.creds = load_oauth_creds()
         self.main_id = main_id
         self.template_id = template_id
 
