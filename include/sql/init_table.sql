@@ -2,9 +2,9 @@
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_category;
+DROP TABLE IF EXISTS public.dim_category;
 
-CREATE TABLE public.dim_category (
+CREATE TABLE IF NOT EXISTS  public.dim_category (
 	category_id text NOT NULL,
 	"name" text NULL,
 	is_active bool NULL,
@@ -17,9 +17,9 @@ CREATE TABLE public.dim_category (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_customer;
+DROP TABLE IF EXISTS public.dim_customer;
 
-CREATE TABLE public.dim_customer (
+CREATE TABLE IF NOT EXISTS  public.dim_customer (
 	customer_id text NOT NULL,
 	code text NULL,
 	"name" text NULL,
@@ -43,9 +43,9 @@ CREATE TABLE public.dim_customer (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_outlet;
+DROP TABLE IF EXISTS public.dim_outlet;
 
-CREATE TABLE public.dim_outlet (
+CREATE TABLE IF NOT EXISTS  public.dim_outlet (
 	outlet_id text NOT NULL,
 	code text NULL,
 	"name" text NULL,
@@ -68,9 +68,9 @@ CREATE TABLE public.dim_outlet (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_payment_method;
+DROP TABLE IF EXISTS public.dim_payment_method;
 
-CREATE TABLE public.dim_payment_method (
+CREATE TABLE IF NOT EXISTS  public.dim_payment_method (
 	payment_method_id text NOT NULL,
 	"name" text NULL,
 	"type" text NULL,
@@ -85,9 +85,9 @@ CREATE TABLE public.dim_payment_method (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_pricebook;
+DROP TABLE IF EXISTS public.dim_pricebook;
 
-CREATE TABLE public.dim_pricebook (
+CREATE TABLE IF NOT EXISTS  public.dim_pricebook (
 	pricebook_id varchar(50) NOT NULL,
 	"name" varchar(255) NULL,
 	description text NULL,
@@ -101,9 +101,9 @@ CREATE TABLE public.dim_pricebook (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_product;
+DROP TABLE IF EXISTS public.dim_product;
 
-CREATE TABLE public.dim_product (
+CREATE TABLE IF NOT EXISTS  public.dim_product (
 	product_id text NOT NULL,
 	code text NULL,
 	"name" text NULL,
@@ -122,9 +122,9 @@ CREATE TABLE public.dim_product (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_supplier;
+DROP TABLE IF EXISTS public.dim_supplier;
 
-CREATE TABLE public.dim_supplier (
+CREATE TABLE IF NOT EXISTS  public.dim_supplier (
 	supplier_id text NOT NULL,
 	code text NULL,
 	"name" text NULL,
@@ -140,9 +140,9 @@ CREATE TABLE public.dim_supplier (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_tax;
+DROP TABLE IF EXISTS public.dim_tax;
 
-CREATE TABLE public.dim_tax (
+CREATE TABLE IF NOT EXISTS  public.dim_tax (
 	tax_id text NOT NULL,
 	"name" text NULL,
 	rate numeric NULL,
@@ -156,9 +156,9 @@ CREATE TABLE public.dim_tax (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_user;
+DROP TABLE IF EXISTS public.dim_user;
 
-CREATE TABLE public.dim_user (
+CREATE TABLE IF NOT EXISTS  public.dim_user (
 	user_id text NOT NULL,
 	login_id text NULL,
 	"name" text NULL,
@@ -173,9 +173,9 @@ CREATE TABLE public.dim_user (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_variant;
+DROP TABLE IF EXISTS public.dim_variant;
 
-CREATE TABLE public.dim_variant (
+CREATE TABLE IF NOT EXISTS  public.dim_variant (
 	variant_id text NOT NULL,
 	product_id text NULL,
 	code text NULL,
@@ -194,9 +194,9 @@ CREATE TABLE public.dim_variant (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.dim_variant_data;
+DROP TABLE IF EXISTS public.dim_variant_data;
 
-CREATE TABLE public.dim_variant_data (
+CREATE TABLE IF NOT EXISTS  public.dim_variant_data (
 	variant_id text NOT NULL,
 	"name" text NULL,
 	code text NULL,
@@ -212,9 +212,9 @@ CREATE TABLE public.dim_variant_data (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.etl_sync_state;
+DROP TABLE IF EXISTS public.etl_sync_state;
 
-CREATE TABLE public.etl_sync_state (
+CREATE TABLE IF NOT EXISTS  public.etl_sync_state (
 	loader_key text NOT NULL,
 	loader_name text NOT NULL,
 	last_status text NULL,
@@ -232,9 +232,9 @@ CREATE TABLE public.etl_sync_state (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.fact_inventory;
+DROP TABLE IF EXISTS public.fact_inventory;
 
-CREATE TABLE public.fact_inventory (
+CREATE TABLE IF NOT EXISTS  public.fact_inventory (
 	inventory_id text NOT NULL,
 	variant_code text NULL,
 	outlet text NULL,
@@ -250,9 +250,9 @@ CREATE TABLE public.fact_inventory (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.fact_invoice;
+DROP TABLE IF EXISTS public.fact_invoice;
 
-CREATE TABLE public.fact_invoice (
+CREATE TABLE IF NOT EXISTS  public.fact_invoice (
 	invoice_id text NOT NULL,
 	outlet text NULL,
 	"number" text NULL,
@@ -277,9 +277,9 @@ CREATE TABLE public.fact_invoice (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.fact_invoice_line;
+DROP TABLE IF EXISTS public.fact_invoice_line;
 
-CREATE TABLE public.fact_invoice_line (
+CREATE TABLE IF NOT EXISTS  public.fact_invoice_line (
 	line_id text NOT NULL,
 	invoice_id text NULL,
 	outlet text NULL,
@@ -313,9 +313,9 @@ CREATE TABLE public.fact_invoice_line (
 
 -- Drop table
 
-DROP IF EXISTS TABLE public.fact_invoice_return;
+DROP TABLE IF EXISTS public.fact_invoice_return;
 
-CREATE TABLE public.fact_invoice_return (
+CREATE TABLE IF NOT EXISTS  public.fact_invoice_return (
 	invoice_id text NOT NULL,
 	outlet text NULL,
 	"number" text NULL,
