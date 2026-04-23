@@ -14,12 +14,45 @@ from gspread_dataframe import set_with_dataframe
 
 BASE_DIR = Path(__file__).resolve()
 ROOT_DIR = BASE_DIR.parents[3]
+STREAMLIT_DIR = ROOT_DIR / "streamlit"
 ENV_PATH = ROOT_DIR / ".env"
 
 load_dotenv(ENV_PATH)
 
-TOKEN_PATH = os.path.join(ROOT_DIR, os.getenv("PICKLE_CRED"))
-CLIENT_SECRET = os.path.join(ROOT_DIR, os.getenv("OAUTH"))
+def resolve_env_path(env_key: str) -> Path:
+    raw_value = os.getenv(env_key, "").strip()
+    if not raw_value:
+        raise ValueError(f"Environment variable `{env_key}` is not configured.")
+
+    normalized = Path(raw_value.replace("\\", "/"))
+    candidate_paths = []
+
+    if normalized.is_absolute():
+        candidate_paths.append(normalized)
+
+        parts = normalized.parts
+        if len(parts) >= 3 and parts[1] == "app" and parts[2] == "streamlit":
+            candidate_paths.append(STREAMLIT_DIR.joinpath(*parts[3:]))
+        elif len(parts) >= 2 and parts[1] == "app":
+            candidate_paths.append(ROOT_DIR.joinpath(*parts[2:]))
+
+    relative_parts = normalized.parts
+    if relative_parts and relative_parts[0] == "streamlit":
+        relative_parts = relative_parts[1:]
+
+    candidate_paths.append(ROOT_DIR / normalized)
+    candidate_paths.append(STREAMLIT_DIR / Path(*relative_parts) if relative_parts else STREAMLIT_DIR)
+
+    for candidate in candidate_paths:
+        resolved = Path(candidate)
+        if resolved.exists():
+            return resolved
+
+    return Path(candidate_paths[-1])
+
+
+TOKEN_PATH = resolve_env_path("PICKLE_CRED")
+CLIENT_SECRET = resolve_env_path("OAUTH")
 
 main_id = os.getenv("GDRIVE_ID")
 template_id = os.getenv("TEMPLATE_ID")
@@ -32,7 +65,7 @@ scope = [
 def create_new_creds():
     creds = None
 
-    if os.path.exists(TOKEN_PATH):
+    if TOKEN_PATH.exists():
         with open(TOKEN_PATH, "rb") as token_file:
             creds = pickle.load(token_file)
 
@@ -40,9 +73,10 @@ def create_new_creds():
         try:
             creds.refresh(Request())
         except Exception:
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRET, scope)
-            creds = flow.run_local_server(port=0)
+            flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRET), scope)
+            creds = flow.run_local_server(port=0, open_browser=False)
 
+        TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(TOKEN_PATH, "wb") as token_file:
             pickle.dump(creds, token_file)
 
@@ -50,7 +84,7 @@ def create_new_creds():
 
 
 def load_oauth_creds():
-    if not os.path.exists(TOKEN_PATH):
+    if not TOKEN_PATH.exists():
         return create_new_creds()
 
     with open(TOKEN_PATH, "rb") as token_file:
@@ -107,7 +141,7 @@ class sheetdrive:
 
         return copied_file.get("id")
 
-    def upload_new_gsheet(self, dataframe, spreadsheet_name=None, open_browser=True):
+    def upload_new_gsheet(self, dataframe, spreadsheet_name=None, open_browser=False):
         if not spreadsheet_name:
             spreadsheet_name = f"Extract_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -141,7 +175,7 @@ class sheetdrive:
         sheet_name="Main_Data",
         overwrite=False,
         spreadsheet_id: str = None,
-        open_browser=True,
+        open_browser=False,
     ):
         file_id = spreadsheet_id
         if not file_id:

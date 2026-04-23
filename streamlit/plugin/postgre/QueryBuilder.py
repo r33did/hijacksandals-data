@@ -10,17 +10,54 @@ from sqlalchemy import create_engine
 
 BASE_DIR = Path(__file__).resolve()
 ROOT_DIR = BASE_DIR.parents[3]
+STREAMLIT_DIR = ROOT_DIR / "streamlit"
 ENV_PATH = ROOT_DIR / ".env"
 
 load_dotenv(ENV_PATH)
 
-user = os.getenv("USER")
-password = os.getenv("PASSWORD")
-host = os.getenv("HOST")
-port = os.getenv("PORT")
-database = os.getenv("DATABASE")
+def get_env_value(*keys: str, default: str | None = None) -> str | None:
+    for key in keys:
+        value = os.getenv(key)
+        if value is not None and value != "":
+            return value.strip().strip("'\"")
+    return default
 
-TEMPLATE_PATH = os.path.join(ROOT_DIR, os.getenv("TEMPLATE_QUERY", "main/plugin/postgre/templatequery.yaml"))
+
+def resolve_env_path(env_key: str, default: str) -> Path:
+    raw_value = get_env_value(env_key, default=default)
+    normalized = Path(str(raw_value).replace("\\", "/"))
+    candidate_paths: list[Path] = []
+
+    if normalized.is_absolute():
+        candidate_paths.append(normalized)
+
+        parts = normalized.parts
+        if len(parts) >= 3 and parts[1] == "app" and parts[2] == "streamlit":
+            candidate_paths.append(STREAMLIT_DIR.joinpath(*parts[3:]))
+        elif len(parts) >= 2 and parts[1] == "app":
+            candidate_paths.append(ROOT_DIR.joinpath(*parts[2:]))
+
+    relative_parts = normalized.parts
+    if relative_parts and relative_parts[0] == "streamlit":
+        relative_parts = relative_parts[1:]
+
+    candidate_paths.append(ROOT_DIR / normalized)
+    candidate_paths.append(STREAMLIT_DIR / Path(*relative_parts) if relative_parts else STREAMLIT_DIR)
+
+    for candidate in candidate_paths:
+        if candidate.exists():
+            return candidate
+
+    return candidate_paths[-1]
+
+
+user = get_env_value("ETL_DB_USER", "POSTGRES_USER", "USER", default="airflow")
+password = get_env_value("ETL_DB_PASSWORD", "POSTGRES_PASSWORD", "PASSWORD", default="airflow")
+host = get_env_value("ETL_DB_HOST", "POSTGRES_HOST", "HOST", default="localhost")
+port = get_env_value("ETL_DB_PORT", "POSTGRES_PORT", "PORT", default="5432")
+database = get_env_value("ETL_DB_NAME", "POSTGRES_DB", "DATABASE", default="airflow")
+
+TEMPLATE_PATH = resolve_env_path("TEMPLATE_QUERY", "streamlit/plugin/postgre/templatequery.yaml")
 
 
 class Engine:
@@ -145,7 +182,7 @@ class Engine:
 
 class ReadTemplate:
     def __init__(self, path=TEMPLATE_PATH):
-        self.path = path
+        self.path = Path(path)
 
         with open(self.path, "r", encoding="utf-8") as template_file:
             self.template_query = yaml.safe_load(template_file) or {}
