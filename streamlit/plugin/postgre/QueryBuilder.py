@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, engine
 
 BASE_DIR = Path(__file__).resolve()
 ROOT_DIR = BASE_DIR.parents[3]
@@ -61,11 +61,19 @@ TEMPLATE_PATH = resolve_env_path("TEMPLATE_QUERY", "streamlit/plugin/postgre/tem
 
 
 class Engine:
-    _dataset = "testing"
+    _dataset = "public"
 
     def __init__(self):
         self.engine = create_engine(
-            f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+            engine.URL.create(
+                drivername="postgresql+psycopg2",
+                username=user,
+                password=password,
+                host=host,
+                port=port,
+                database=database,
+            )
+            ,
             pool_pre_ping=True,
         )
 
