@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import yaml
 from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, engine
 
 BASE_DIR = Path(__file__).resolve()
 ROOT_DIR = BASE_DIR.parents[3]
@@ -51,21 +51,29 @@ def resolve_env_path(env_key: str, default: str) -> Path:
     return candidate_paths[-1]
 
 
-user = get_env_value("ETL_DB_USER", "POSTGRES_USER", "USER", default="airflow")
-password = get_env_value("ETL_DB_PASSWORD", "POSTGRES_PASSWORD", "PASSWORD", default="airflow")
-host = get_env_value("ETL_DB_HOST", "POSTGRES_HOST", "HOST", default="localhost")
-port = get_env_value("ETL_DB_PORT", "POSTGRES_PORT", "PORT", default="5432")
-database = get_env_value("ETL_DB_NAME", "POSTGRES_DB", "DATABASE", default="airflow")
+user = get_env_value("ETL_DB_USER", default=None)
+password = get_env_value("ETL_DB_PASSWORD", default=None)
+host = get_env_value( "POSTGRES_HOST", default=None)
+port = get_env_value("ETL_DB_PORT",  default=None)
+database = get_env_value("ETL_DB_NAME", default="postgres")
 
 TEMPLATE_PATH = resolve_env_path("TEMPLATE_QUERY", "streamlit/plugin/postgre/templatequery.yaml")
 
 
 class Engine:
-    _dataset = "testing"
+    _dataset = "public"
 
     def __init__(self):
         self.engine = create_engine(
-            f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}",
+            engine.URL.create(
+                drivername="postgresql+psycopg2",
+                username=user,
+                password=password,
+                host=host,
+                port=port,
+                database=database,
+            )
+            ,
             pool_pre_ping=True,
         )
 
