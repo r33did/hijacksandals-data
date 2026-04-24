@@ -22,9 +22,7 @@ x-airflow-common: &airflow-common
     ETL_DB_USER: ${POSTGRES_USER}
     ETL_DB_PASSWORD: ${POSTGRES_PASSWORD}
   volumes:
-    - ./dags:/app/dags
-    - ./logs:/app/logs
-    - ./plugins:/app/plugins
+    - ${PROJECT_ROOT:-.}:/app
   depends_on:
     postgres:
       condition: service_healthy
@@ -59,8 +57,7 @@ services:
     <<: *airflow-common
     container_name: airflow-init
     volumes:
-    - ./include:/app/include
-    - ./config:/app/config
+      - ${PROJECT_ROOT:-.}:/app
     command: >
       bash -c "airflow db migrate &&
       airflow users create
@@ -109,8 +106,7 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      - ./streamlit:/app/streamlit
-      - ./.streamlit:/app/.streamlit
+      - ${PROJECT_ROOT:-.}:/app
     environment:
       ETL_DB_HOST: postgres
       ETL_DB_PORT: 5432

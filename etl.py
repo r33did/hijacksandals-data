@@ -56,7 +56,9 @@ def get_token():
     return token
 
 
-def api_get(endpoint, params=None, retries=3):
+def api_get(endpoint, params=None, retries=3, ignore_statuses=None):
+    ignore_statuses = set(ignore_statuses or [])
+
     for _ in range(retries):
         response = requests.get(
             f"{BASE_URL}/{endpoint}",
@@ -76,6 +78,10 @@ def api_get(endpoint, params=None, retries=3):
             log(f"Rate limited. Waiting {wait_seconds}s before retrying.")
             time.sleep(wait_seconds + 2)
             continue
+
+        if response.status_code in ignore_statuses:
+            log(f"Skipping {endpoint}: {response.status_code} {response.url}")
+            return []
 
         if not response.ok:
             log(
@@ -673,20 +679,13 @@ def load_fact_inventory(cursor, start_date=None, end_date=None):
                 "PageSize": PAGE_SIZE,
                 "ListOutletID": outlet_id,
             }
-            try:
-                data = to_list(api_get("Inventory", params))
-            except requests.exceptions.HTTPError as exc:
-                response = exc.response
-                if response is not None and response.status_code == 403:
-                    log(
-                        "Skipping inventory for outlet "
-                        f"'{outlet_name}' ({outlet_id}) on page {page}: "
-                        "403 Forbidden"
-                    )
-                    break
-                raise
+            data = to_list(api_get("Inventory", params, ignore_statuses={403}))
 
             if not data:
+                log(
+                    f"Inventory fetch ended for outlet '{outlet_name}' ({outlet_id}) "
+                    f"at page {page}."
+                )
                 break
 
             for item in data:
