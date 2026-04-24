@@ -18,7 +18,7 @@ ROOT_DIR = APP_DIR.parent
 CONFIG_DIR = APP_DIR / "config"
 APP_CONFIG_PATH = CONFIG_DIR / "app_config.json"
 ENV_PATH = ROOT_DIR / ".env"
-LOGO_PATH = ROOT_DIR / "img" / "Logo.png"
+LOGO_PATH = APP_DIR / "img" / "Logo.png"
 TEMPLATE_QUERY = ReadTemplate()
 
 load_dotenv(ENV_PATH)
@@ -27,16 +27,7 @@ BASE_PAGES = ["Home", "Data Extractor", "Report Generator & Refresher", "Dashboa
 ADMIN_PAGES = BASE_PAGES + ["Config"]
 USR_PAGES = [page for page in BASE_PAGES if page not in ["Dashboard", "Analyze"]]
 
-DEFAULT_CONFIG = {
-    "google_drive": {
-        "main_id": os.getenv("GDRIVE_ID", ""),
-    },
-    "users": {
-        "admin": {"password": "admin123", "pages": ADMIN_PAGES},
-        "user1": {"password": "user123", "pages": USR_PAGES},
-        "user2": {"password": "user223", "pages": USR_PAGES},
-    },
-}
+DEFAULT_CONFIG = {}
 
 
 def ensure_app_config():
