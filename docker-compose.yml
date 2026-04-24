@@ -14,6 +14,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__WARN_DEPLOYMENT_EXPOSURE: "False"
     AIRFLOW__CORE__DAGS_FOLDER: /app/dags
     AIRFLOW__LOGGING__BASE_LOG_FOLDER: /app/logs
+    AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth
     AIRFLOW__HOME: /app/airflow
     PYTHONPATH: /app
     ETL_DB_HOST: postgres
