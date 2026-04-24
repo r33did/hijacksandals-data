@@ -541,8 +541,8 @@ def load_fact_invoice(cursor, start_date=None, end_date=None):
     """Load invoice headers for outlet and tag analysis."""
     raw_rows = paginate_post(
         "Invoice/MultipleOutlet",
-        start_date='2026-01-01',
-        end_date='2026-01-03',
+        start_date=start_date,
+        end_date=end_date,
     )
     rows = []
 
@@ -574,8 +574,8 @@ def load_fact_invoice_return(cursor, start_date=None, end_date=None):
     """Load invoice headers for outlet and tag analysis."""
     raw_rows = paginate_post(
         "Invoice/Return",
-        start_date='2026-01-01',
-        end_date='2026-01-03',
+        start_date=start_date,
+        end_date=end_date,
     )
     rows = []
 
@@ -608,8 +608,8 @@ def load_fact_invoice_line(cursor, start_date=None, end_date=None):
     """Load invoice line items by expanding each invoice variant."""
     raw_rows = paginate_post(
         "Invoice/MultipleOutlet/WithVariant",
-        start_date='2026-01-01',
-        end_date='2026-01-03',
+        start_date=start_date,
+        end_date=end_date,
     )
     rows = []
 
@@ -673,7 +673,19 @@ def load_fact_inventory(cursor, start_date=None, end_date=None):
                 "PageSize": PAGE_SIZE,
                 "ListOutletID": outlet_id,
             }
-            data = to_list(api_get("Inventory", params))
+            try:
+                data = to_list(api_get("Inventory", params))
+            except requests.exceptions.HTTPError as exc:
+                response = exc.response
+                if response is not None and response.status_code == 403:
+                    log(
+                        "Skipping inventory for outlet "
+                        f"'{outlet_name}' ({outlet_id}) on page {page}: "
+                        "403 Forbidden"
+                    )
+                    break
+                raise
+
             if not data:
                 break
 

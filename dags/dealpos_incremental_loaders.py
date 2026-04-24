@@ -19,13 +19,17 @@ FACT_LOOKBACK_DAYS = 1
 
 def get_fact_loader_keys():
     if hasattr(etl, "FACT_DAG_LOADER_KEYS"):
-        return etl.FACT_DAG_LOADER_KEYS
+        return [
+            loader_key
+            for loader_key in etl.FACT_DAG_LOADER_KEYS
+            if etl.LOADER_CONFIGS[loader_key].get("supports_incremental_window", False)
+        ]
 
     return [
         loader_key
         for loader_key, loader_config in etl.LOADER_CONFIGS.items()
         if loader_key.startswith("fact_")
-        or loader_config.get("supports_incremental_window", False)
+        and loader_config.get("supports_incremental_window", False)
     ]
 
 
