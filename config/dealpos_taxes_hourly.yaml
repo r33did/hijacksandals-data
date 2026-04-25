@@ -1,0 +1,9 @@
+schedule: "0 * * * *"
+
+tasks:
+  - name: taxes_hourly
+    type: etl
+    plugin_module: dealpos_etl
+    loader_key: taxes
+    dag_prefix: dealpos
+    mode: full
