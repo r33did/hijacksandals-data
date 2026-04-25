@@ -36,47 +36,58 @@ PAGE_SIZE = 500
 DEFAULT_BATCH_SIZE = 1000
 TOKEN = None
 SYNC_STATE_TABLE = "etl_sync_state"
+RATE_LIMIT_WAIT_SECONDS = 300
+API_RETRY_COUNT = 5
 
 
 def log(message):
     print(message)
 
 
-def get_token():
-    response = requests.post(
-        f"{BASE_URL}/Token/OAuth2",
-        json={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
-        headers={"Content-Type": "application/json"},
+def wait_for_rate_limit(response, endpoint, attempt, retries):
+    if response.status_code != 429:
+        return False
+
+    log(
+        f"Rate limited on {endpoint} "
+        f"(attempt {attempt}/{retries}). Waiting {RATE_LIMIT_WAIT_SECONDS}s before retrying."
     )
-    response.raise_for_status()
-
-    payload = response.json()
-    token = f"{payload['token_type']} {payload['access_token']}"
-    log(f"Token acquired: {token[:30]}...")
-    return token
+    time.sleep(RATE_LIMIT_WAIT_SECONDS)
+    return True
 
 
-def api_get(endpoint, params=None, retries=3, ignore_statuses=None):
+def get_token(retries=API_RETRY_COUNT):
+    for attempt in range(1, retries + 1):
+        response = requests.post(
+            f"{BASE_URL}/Token/OAuth2",
+            json={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
+            headers={"Content-Type": "application/json"},
+        )
+
+        if wait_for_rate_limit(response, "Token/OAuth2", attempt, retries):
+            continue
+
+        response.raise_for_status()
+
+        payload = response.json()
+        token = f"{payload['token_type']} {payload['access_token']}"
+        log(f"Token acquired: {token[:30]}...")
+        return token
+
+    raise Exception("Request failed after rate-limit retries: Token/OAuth2")
+
+
+def api_get(endpoint, params=None, retries=API_RETRY_COUNT, ignore_statuses=None):
     ignore_statuses = set(ignore_statuses or [])
 
-    for _ in range(retries):
+    for attempt in range(1, retries + 1):
         response = requests.get(
             f"{BASE_URL}/{endpoint}",
             headers={"Authorization": TOKEN, "Accept": "*/*"},
             params=params,
         )
 
-        if response.status_code == 429:
-            try:
-                wait_seconds = (
-                    int("".join(filter(str.isdigit, response.json().get("Message", ""))))
-                    or 180
-                )
-            except Exception:
-                wait_seconds = 180
-
-            log(f"Rate limited. Waiting {wait_seconds}s before retrying.")
-            time.sleep(wait_seconds + 2)
+        if wait_for_rate_limit(response, endpoint, attempt, retries):
             continue
 
         if response.status_code in ignore_statuses:
@@ -92,11 +103,11 @@ def api_get(endpoint, params=None, retries=3, ignore_statuses=None):
 
         return response.json()
 
-    raise Exception(f"Request failed after {retries} retries: {endpoint}")
+    raise Exception(f"Request failed after rate-limit retries: {endpoint}")
 
 
-def api_post(endpoint, body, retries=3):
-    for _ in range(retries):
+def api_post(endpoint, body, retries=API_RETRY_COUNT):
+    for attempt in range(1, retries + 1):
         response = requests.post(
             f"{BASE_URL}/{endpoint}",
             headers={
@@ -107,17 +118,7 @@ def api_post(endpoint, body, retries=3):
             json=body,
         )
 
-        if response.status_code == 429:
-            try:
-                wait_seconds = (
-                    int("".join(filter(str.isdigit, response.json().get("Message", ""))))
-                    or 180
-                )
-            except Exception:
-                wait_seconds = 180
-
-            log(f"Rate limited. Waiting {wait_seconds}s before retrying.")
-            time.sleep(wait_seconds + 2)
+        if wait_for_rate_limit(response, endpoint, attempt, retries):
             continue
 
         if not response.ok:
@@ -126,7 +127,7 @@ def api_post(endpoint, body, retries=3):
 
         return response.json()
 
-    raise Exception(f"Request failed after {retries} retries: {endpoint}")
+    raise Exception(f"Request failed after rate-limit retries: {endpoint}")
 
 
 def safe_ts(value):
