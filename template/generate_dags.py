@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import importlib
 import yaml
 import json
 from collections import OrderedDict
@@ -10,6 +11,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 CONFIG_DIR = os.path.join(ROOT_DIR, "config")
 OUTPUT_DIR = os.path.join(ROOT_DIR, "dags")
+PLUGINS_DIR = os.path.join(ROOT_DIR, "plugins")
+
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 DEFAULTS = {
     "conn_id": "ioh-hive",
@@ -20,7 +25,7 @@ DEFAULTS = {
 }
 
 REQUIRED_FIELDS = ["schedule", "tasks"]
-VALID_TASK_TYPES = ("sql", "bash", "hiveSensor", "csvSensor", "externalTaskSensor", "triggerDagRun")
+VALID_TASK_TYPES = ("sql", "bash", "hiveSensor", "csvSensor", "externalTaskSensor", "triggerDagRun", "etl")
 
 # Recognised partition date keys and their strftime format
 PARTITION_DATE_KEYS = {
@@ -122,6 +127,48 @@ def validate_config(config, filepath):
                 f"Config {filepath} task '{task['name']}' has invalid type '{task['type']}' "
                 f"(must be {', '.join(VALID_TASK_TYPES)})"
             )
+        if task["type"] == "etl":
+            plugin_module = task.get("plugin_module")
+            loader_key = task.get("loader_key", task.get("loader_header"))
+            mode = task.get("mode", task.get("loader_type"))
+            if not plugin_module:
+                raise ValueError(f"Config {filepath} task '{task['name']}' of type etl is missing required field 'plugin_module'")
+            if not loader_key:
+                raise ValueError(
+                    f"Config {filepath} task '{task['name']}' of type etl is missing required field "
+                    f"'loader_key' (or legacy alias 'loader_header')"
+                )
+            if mode and mode not in ("full", "incremental", "dimension"):
+                raise ValueError(
+                    f"Config {filepath} task '{task['name']}' of type etl has invalid mode '{mode}' "
+                    f"(must be full, incremental, or dimension)"
+                )
+            plugin_path = os.path.join(PLUGINS_DIR, f"{plugin_module}.py")
+            if not os.path.isfile(plugin_path):
+                raise ValueError(
+                    f"Config {filepath} task '{task['name']}' references plugin_module '{plugin_module}', "
+                    f"but file was not found at plugins/{plugin_module}.py"
+                )
+            plugin = load_etl_plugin_module(plugin_module)
+            loader_configs = getattr(plugin, "LOADER_CONFIGS", None)
+            run_loader = getattr(plugin, "run_loader", None)
+            if not isinstance(loader_configs, dict):
+                raise ValueError(
+                    f"Plugin '{plugin_module}' must define LOADER_CONFIGS as a dict"
+                )
+            if not callable(run_loader):
+                raise ValueError(
+                    f"Plugin '{plugin_module}' must define callable run_loader(loader_key, ...)"
+                )
+            if loader_key not in loader_configs:
+                raise ValueError(
+                    f"Config {filepath} task '{task['name']}' references loader_key '{loader_key}' "
+                    f"which is not defined in plugins/{plugin_module}.py"
+                )
+            if task.get("lookback_days") is not None and int(task["lookback_days"]) < 0:
+                raise ValueError(
+                    f"Config {filepath} task '{task['name']}' has invalid lookback_days '{task['lookback_days']}'"
+                )
         if task["type"] == "hiveSensor":
             if "partitions" not in task:
                 raise ValueError(f"Config {filepath} task '{task['name']}' of type hiveSensor is missing required field 'partitions'")
@@ -200,6 +247,131 @@ def description_from_name(name):
 def parse_start_date(date_str):
     dt = datetime.strptime(date_str, "%Y-%m-%d")
     return dt.year, dt.month, dt.day
+
+
+def load_etl_plugin_module(plugin_module):
+    try:
+        return importlib.import_module(f"plugins.{plugin_module}")
+    except Exception as exc:
+        raise ValueError(f"Failed to import plugin module 'plugins.{plugin_module}': {exc}") from exc
+
+
+def normalize_etl_mode(task, loader_config):
+    mode = task.get("mode", task.get("loader_type"))
+    if mode == "dimension":
+        return "full"
+    if mode:
+        return mode
+    return "incremental" if loader_config.get("supports_incremental_window") else "full"
+
+
+def build_etl_task_meta(task):
+    plugin_module = task["plugin_module"]
+    loader_key = task.get("loader_key", task.get("loader_header"))
+    plugin = load_etl_plugin_module(plugin_module)
+    loader_config = plugin.LOADER_CONFIGS[loader_key]
+    mode = normalize_etl_mode(task, loader_config)
+    dag_prefix = task.get("dag_prefix") or getattr(plugin, "DEFAULT_DAG_PREFIX", plugin_module)
+    dag_id = task.get("dag_id", f"{dag_prefix}_{loader_key}_hourly")
+    tags = list(OrderedDict.fromkeys(
+        list(task.get("tags", [])) +
+        list(loader_config.get("tags", [])) +
+        [dag_prefix, "etl", loader_key]
+    ))
+    return {
+        "plugin": plugin,
+        "plugin_module": plugin_module,
+        "loader_key": loader_key,
+        "loader_config": loader_config,
+        "mode": mode,
+        "dag_prefix": dag_prefix,
+        "dag_id": dag_id,
+        "tags": tags,
+        "lookback_days": int(task.get("lookback_days", 1)),
+    }
+
+
+def generate_etl_dags(config, filename):
+    owner = config.get("owner", DEFAULTS["owner"])
+    catchup = config.get("catchup", DEFAULTS["catchup"])
+    start_date = config.get("start_date", DEFAULTS["start_date"])
+    start_year, start_month, start_day = parse_start_date(start_date)
+    tasks = config["tasks"]
+    schedule = config["schedule"]
+
+    if any(t.get("dag_group") for t in tasks):
+        raise ValueError("ETL task generation does not support dag_group yet")
+
+    outputs = {}
+    for task in tasks:
+        if task["type"] != "etl":
+            raise ValueError("Configs that contain ETL tasks cannot mix them with non-ETL task types yet")
+
+        meta = build_etl_task_meta(task)
+        loader_name = meta["loader_config"]["name"]
+        description = task.get("description", f"Hourly {meta['dag_prefix']} loader for {loader_name}")
+        lines = []
+        lines.append("from datetime import datetime, timedelta")
+        lines.append("")
+        lines.append("from airflow import DAG")
+        lines.append("from airflow.operators.python import PythonOperator")
+        lines.append("")
+        lines.append("from plugins import " + meta["plugin_module"])
+        lines.append("")
+        lines.append("default_args = {")
+        lines.append(f'    "owner": "{owner}",')
+        lines.append('    "depends_on_past": False,')
+        lines.append('    "retries": 1,')
+        lines.append('    "retry_delay": timedelta(minutes=10),')
+        lines.append("}")
+        lines.append("")
+        lines.append(f"LOOKBACK_DAYS = {meta['lookback_days']}")
+        lines.append("")
+        lines.append("def run_etl_loader(loader_key, **context):")
+        lines.append(f'    loader_config = {meta["plugin_module"]}.LOADER_CONFIGS[loader_key]')
+        if meta["mode"] == "incremental":
+            lines.append("    start_date = None")
+            lines.append("    end_date = None")
+            lines.append('    if loader_config.get("supports_incremental_window", False):')
+            lines.append('        interval_start = context["data_interval_start"] - timedelta(days=LOOKBACK_DAYS)')
+            lines.append('        interval_end = context["data_interval_end"]')
+            lines.append('        start_date = interval_start.strftime("%Y-%m-%d")')
+            lines.append('        end_date = interval_end.strftime("%Y-%m-%d")')
+            lines.append(f'    {meta["plugin_module"]}.run_loader(loader_key, start_date=start_date, end_date=end_date)')
+        else:
+            lines.append("    del context")
+            lines.append(f'    {meta["plugin_module"]}.run_loader(loader_key)')
+        lines.append("")
+        lines.append("dag = DAG(")
+        lines.append(f'    dag_id="{meta["dag_id"]}",')
+        lines.append("    default_args=default_args,")
+        lines.append(f'    description="{description}",')
+        if isinstance(schedule, dict):
+            if schedule.get("type") == "multi_cron":
+                lines.append('    schedule=' + json.dumps(schedule.get("cron_defs", [])) + ",")
+            else:
+                raise ValueError(f"Unsupported ETL schedule mapping: {schedule}")
+        elif schedule is None:
+            lines.append("    schedule=None,")
+        else:
+            lines.append(f'    schedule="{schedule}",')
+        lines.append(f"    start_date=datetime({start_year}, {start_month}, {start_day}),")
+        lines.append(f"    catchup={catchup},")
+        lines.append("    max_active_runs=1,")
+        lines.append(f"    tags={meta['tags']},")
+        lines.append(")")
+        lines.append("")
+        lines.append("with dag:")
+        lines.append("    PythonOperator(")
+        lines.append(f'        task_id="load_{meta["loader_key"]}",')
+        lines.append("        python_callable=run_etl_loader,")
+        lines.append(f'        op_kwargs={{"loader_key": "{meta["loader_key"]}"}},')
+        lines.append("    )")
+        lines.append("")
+        lines.append(f'globals()["{meta["dag_id"]}"] = dag')
+        outputs[f"{meta['dag_id']}.py"] = "\n".join(lines)
+
+    return outputs
 
 
 
@@ -1257,9 +1429,18 @@ def main():
         validate_config(config, rel_path)
 
         # Route: grouped (multi-DAG) vs single DAG
+        has_etl = any(t["type"] == "etl" for t in config["tasks"])
         has_groups = any(t.get("dag_group") for t in config["tasks"])
 
-        if has_groups:
+        if has_etl:
+            outputs = generate_etl_dags(config, filename)
+            for out_filename, dag_code in outputs.items():
+                output_file = os.path.join(OUTPUT_DIR, out_filename)
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(dag_code)
+                print(f"  Generated: {output_file}")
+                generated += 1
+        elif has_groups:
             outputs = generate_grouped_dags(config, filename)
             for out_filename, dag_code in outputs.items():
                 output_file = os.path.join(OUTPUT_DIR, out_filename)
