@@ -1,0 +1,10 @@
+schedule: "0 * * * *"
+
+tasks:
+  - name: fact_invoice_return_hourly
+    type: etl
+    plugin_module: dealpos_etl
+    loader_key: fact_invoice_return
+    dag_prefix: dealpos
+    mode: incremental
+    lookback_days: 1
