@@ -1,0 +1,9 @@
+schedule: "0 * * * *"
+
+tasks:
+  - name: outlets_hourly
+    type: etl
+    plugin_module: dealpos_etl
+    loader_key: outlets
+    dag_prefix: dealpos
+    mode: full

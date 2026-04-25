@@ -1,0 +1,9 @@
+schedule: "0 * * * *"
+
+tasks:
+  - name: variant_data_hourly
+    type: etl
+    plugin_module: dealpos_etl
+    loader_key: variant_data
+    dag_prefix: dealpos
+    mode: full
