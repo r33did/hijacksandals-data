@@ -23,11 +23,11 @@ CLIENT_ID = "019c9a25-05c4-7a38-b04a-dd1efe4c08ef"
 CLIENT_SECRET = "019c9a26-51bf-7232-ae0a-4c702ba345e9"
 
 DB_CONFIG = {
-    "host": os.getenv("ETL_DB_HOST", "localhost"),
-    "port": int(os.getenv("ETL_DB_PORT", "5432")),
-    "dbname": os.getenv("ETL_DB_NAME", "devs"),
-    "user": os.getenv("ETL_DB_USER", "supersu"),
-    "password": os.getenv("ETL_DB_PASSWORD", "RRC@2026"),
+    "host": os.getenv("ETL_DB_HOST"),
+    "port": int(os.getenv("ETL_DB_PORT")),
+    "dbname": os.getenv("ETL_DB_NAME"),
+    "user": os.getenv("ETL_DB_USER"),
+    "password": os.getenv("ETL_DB_PASSWORD"),
 }
 
 DEFAULT_START_DATE = "2026-03-01"
@@ -312,6 +312,11 @@ def paginate_get(endpoint, page_size=DEFAULT_BATCH_SIZE, extra_params=None, data
         time.sleep(1)
 
     return all_rows
+
+
+def get_latest_loaded_at(cursor, table_name):
+    cursor.execute(f"SELECT MAX(_loaded_at) FROM {table_name}")
+    return cursor.fetchone()[0]
 
 
 def load_outlets(cursor, start_date=None, end_date=None):
@@ -661,55 +666,58 @@ def load_fact_invoice_line(cursor, start_date=None, end_date=None):
 
 
 def load_fact_inventory(cursor, start_date=None, end_date=None):
-    """Full snapshot of inventory across all outlets using paginated /Inventory endpoint."""
-    # Fetch outlets to get per-outlet inventory
-    outlets = to_list(api_get("Outlet", {"Suspended": "false"}))
-    log(f"Found {len(outlets)} outlets for inventory snapshot.")
+    """Incrementally load inventory changes using paginated /Inventory/Modified."""
+    since = get_latest_loaded_at(cursor, "fact_inventory")
+    since_param = since.isoformat(timespec="seconds") if since else None
+    if since_param:
+        log(f"Loading inventory changes since {since_param}.")
+    else:
+        log("No existing fact_inventory watermark found. Loading full modified inventory feed.")
 
     rows = []
+    page = 1
 
-    for outlet in outlets:
-        outlet_id = str(outlet.get("ID", ""))
-        outlet_name = outlet.get("Name", "")
-        page = 1
+    while True:
+        params = {
+            "PageNumber": page,
+            "PageSize": PAGE_SIZE,
+        }
+        if since_param:
+            params["Since"] = since_param
 
-        while True:
-            params = {
-                "PageNumber": page,
-                "PageSize": PAGE_SIZE,
-                "ListOutletID": outlet_id,
-            }
-            data = to_list(api_get("Inventory", params, ignore_statuses={403}))
+        data = to_list(api_get("Inventory/Modified", params))
+        if not data:
+            log(f"Inventory modified fetch ended at page {page}.")
+            break
 
-            if not data:
-                log(
-                    f"Inventory fetch ended for outlet '{outlet_name}' ({outlet_id}) "
-                    f"at page {page}."
-                )
-                break
+        load_time = datetime.now()
+        for item in data:
+            variant_code = item.get("Code")
+            outlet_name = item.get("Outlet", "")
+            inv = item.get("I") or {}
+            on_hand = inv.get("OnHand", item.get("OnHand", item.get("Inventory", 0)))
+            allocated = inv.get("Allocated", item.get("Allocated", 0))
+            available = inv.get("Available", item.get("Available", on_hand - allocated))
 
-            for item in data:
-                variant_code = item.get("Code")
-                inv = item.get("I") or {}
-                rows.append({
+            rows.append(
+                {
                     "inventory_id": f"{variant_code}_{outlet_name.replace(' ', '_')}",
                     "variant_code": variant_code,
                     "outlet": outlet_name,
-                    "on_hand": inv.get("OnHand", 0),
-                    "allocated": inv.get("Allocated", 0),
-                    "available": inv.get("Available", 0),
-                    "_loaded_at": datetime.now(),
-                })
+                    "on_hand": on_hand,
+                    "allocated": allocated,
+                    "available": available,
+                    "_loaded_at": load_time,
+                }
+            )
 
-            log(f"Outlet '{outlet_name}' page {page}: {len(data)} rows.")
+        log(f"Inventory modified page {page}: {len(data)} rows.")
 
-            if len(data) < PAGE_SIZE:
-                break
+        if len(data) < PAGE_SIZE:
+            break
 
-            page += 1
-            time.sleep(0.5)
-
-        time.sleep(1)
+        page += 1
+        time.sleep(0.5)
 
     return upsert(cursor, "fact_inventory", rows, "inventory_id")
 
@@ -868,26 +876,26 @@ def run_loader(loader_key, start_date=None, end_date=None):
         connection.close()
 
 
-def main():
-    initial_loader_keys = [
-        "fact_inventory",
-        # "fact_invoice_return"
-        # "outlets",
-        # "categories",
-        # "customers",
-        # "products",
-        # "variant_data",
-        # "suppliers",
-        # "payment_methods",
-        # "taxes",
-        # "users",
-    ]
+# def main():
+#     initial_loader_keys = [
+#         "fact_inventory",
+#         # "fact_invoice_return"
+#         # "outlets",
+#         # "categories",
+#         # "customers",
+#         # "products",
+#         # "variant_data",
+#         # "suppliers",
+#         # "payment_methods",
+#         # "taxes",
+#         # "users",
+#     ]
 
-    for loader_key in initial_loader_keys:
-        run_loader(loader_key)
+#     for loader_key in initial_loader_keys:
+#         run_loader(loader_key)
 
-    log("Initial dimension loading finished.")
+#     log("Initial dimension loading finished.")
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
