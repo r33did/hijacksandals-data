@@ -19,7 +19,9 @@ templatequery = ReadTemplate()
 
 BASE_DIR = Path(__file__).resolve()
 ROOT_DIR = BASE_DIR.parents[1]
-CONFIG_DIR = BASE_DIR.parent / "config"
+
+# CONFIG_DIR = BASE_DIR.parent / "config" -> ROOT_DIR / "config" pake config di ROOT_DIR aja, karena generate_dags.py juga butuh akses ke config dan dijalankan dari ROOT_DIR
+CONFIG_DIR = ROOT_DIR / "config"
 SCHEDULE_REGISTRY_PATH = CONFIG_DIR / "scheduled_reports.json"
 ENV_PATH = ROOT_DIR / ".env"
 
