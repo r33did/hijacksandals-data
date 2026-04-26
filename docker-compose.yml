@@ -96,6 +96,17 @@ services:
       timeout: 10s
       retries: 5
 
+  # ─── Airflow Triggerer ────────────────────────────────────────
+  airflow-triggerer:
+    <<: *airflow-common
+    container_name: airflow-triggerer
+    command: airflow triggerer
+    healthcheck:
+      test: ["CMD", "airflow", "jobs", "check", "--job-type", "TriggererJob", "--local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
   # ─── Streamlit ────────────────────────────────────────────────
   streamlit:
     build:
