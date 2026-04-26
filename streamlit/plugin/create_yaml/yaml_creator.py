@@ -108,6 +108,8 @@ def create_dags_yaml(
                 "failed_states": ["failed"],
                 "timeout": 7200,
                 "poke_interval": 60,
+                "deferrable": False,
+                "mode": "reschedule",
             }
         )
         wait_task_names.append(wait_task_name)
