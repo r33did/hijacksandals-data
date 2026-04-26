@@ -78,7 +78,8 @@ def create_dags_yaml(
         output_path = output_path.with_suffix(".yaml")
 
     tasks: list[dict[str, Any]] = []
-    wait_task_names: list[str] = []
+    # wait_task_names: list[str] = []
+    trigger_task_names: list[str] = []
 
     for refresh_item in dags_refresh_items:
         dag_id = refresh_item["dag_id"]
@@ -97,22 +98,23 @@ def create_dags_yaml(
                 "depends_on": [],
             }
         )
-        tasks.append(
-            {
-                "name": wait_task_name,
-                "type": "externalTaskSensor",
-                "external_dag_id": dag_id,
-                "external_task_id": external_task_id,
-                "depends_on": [trigger_task_name],
-                "allowed_states": ["success"],
-                "failed_states": ["failed"],
-                "timeout": 7200,
-                "poke_interval": 60,
-                "deferrable": False,
-                "mode": "reschedule",
-            }
-        )
-        wait_task_names.append(wait_task_name)
+        trigger_task_names.append(trigger_task_name)
+        # tasks.append(
+        #     {
+        #         "name": wait_task_name,
+        #         "type": "externalTaskSensor",
+        #         "external_dag_id": dag_id,
+        #         "external_task_id": external_task_id,
+        #         "depends_on": [trigger_task_name],
+        #         "allowed_states": ["success"],
+        #         "failed_states": ["failed"],
+        #         "timeout": 7200,
+        #         "poke_interval": 60,
+        #         "deferrable": False,
+        #         "mode": "reschedule",
+        #     }
+        # )
+        # wait_task_names.append(wait_task_name)
 
     validate_task_name = normalize_task_name(f"{task_prefix}_validate_table")
     refresh_task_name = normalize_task_name(f"{task_prefix}_refresh_sheet")
@@ -123,7 +125,7 @@ def create_dags_yaml(
             "type": "sql",
             "query": f"SELECT * FROM public.{table.strip()} LIMIT 1;",
             "table": table.strip(),
-            "depends_on": wait_task_names,
+            "depends_on": trigger_task_names,
         }
     )
     tasks.append(
