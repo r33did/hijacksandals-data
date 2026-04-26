@@ -17,8 +17,8 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 DEFAULTS = {
-    "conn_id": "ioh-hive",
-    "owner": "IOH - DE",
+    "conn_id": "hijack-conn",
+    "owner": "Hijack Team",
     "timezone": "Asia/Jakarta",
     "start_date": "2026-01-01",
     "catchup": False,
