@@ -1,10 +1,8 @@
-import base64
 import datetime
 import json
-import os
+import runpy
 from pathlib import Path
 from typing import Any
-from urllib import error, request
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +10,7 @@ from dotenv import load_dotenv
 
 from plugin.postgre.QueryBuilder import Engine, ReadTemplate
 from plugin.sheets.UploadSheets import sheetdrive as SheetDrive
+from plugin.create_yaml.yaml_creator import create_dags_yaml
 
 engine = Engine()
 sheetdrive = SheetDrive()
@@ -112,7 +111,12 @@ def build_spreadsheet_url(sheet_id: str) -> str:
 
 def build_template_catalog() -> pd.DataFrame:
     return pd.DataFrame(templatequery.get_template_context()).rename(
-        columns={"template_name": "Template Name", "description": "Description"}
+        columns={
+            "template_name": "Template Name",
+            "description": "Description",
+            "table": "Table",
+            "dags_refresh": "DAGs Refresh",
+        }
     )
 
 
@@ -122,8 +126,8 @@ def render_page_tutorial():
             "\n".join(
                 [
                     "1. `Refresh Data` updates worksheet tabs whose names already match saved templates.",
-                    "2. `Generate & Set Schedule` creates or overwrites one selected sheet using the chosen template and saves schedule metadata.",
-                    "3. `Delete Schedule` lists saved DAGs, shows their details, and removes the selected schedule.",
+                    "2. `Generate & Set Schedule` creates or overwrites one selected sheet, writes a DAG YAML config, then runs the DAG generator.",
+                    "3. `Delete Schedule` lists saved DAGs, shows their details, and removes the local registry plus generated files.",
                 ]
             )
         )
@@ -182,45 +186,18 @@ def render_spreadsheet_selector(report_options: dict[str, str], state_prefix: st
 
 
 def run_template_query(template_name: str) -> pd.DataFrame:
-    return engine.execute_query(templatequery.get_query(template_name), params=None)
+    query_text = templatequery.get_query(template_name)
+    if not query_text:
+        return pd.DataFrame()
+    return engine.execute_query(query_text, params=None)
 
 
 def preview_template_query(template_name: str) -> tuple[str, pd.DataFrame]:
-    query_text = (templatequery.get_query(template_name) or "").rstrip().rstrip(";")
-    preview_query = f"{query_text}\nLIMIT 20;"
+    table_name = templatequery.get_table(template_name)
+    if not table_name:
+        return "No table is configured for this template.", pd.DataFrame()
+    preview_query = templatequery.build_table_query(table_name, limit=20)
     return preview_query, engine.execute_query(preview_query, params=None)
-
-
-def call_airflow_schedule_api(method: str, endpoint: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    airflow_api_url = os.getenv("AIRFLOW_API_URL", "").strip().rstrip("/")
-    if not airflow_api_url:
-        return {
-            "ok": False,
-            "skipped": True,
-            "message": "AIRFLOW_API_URL is not configured. Schedule metadata was saved locally only.",
-        }
-
-    url = f"{airflow_api_url}{endpoint}"
-    request_data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    api_request = request.Request(url, data=request_data, method=method.upper())
-    api_request.add_header("Content-Type", "application/json")
-
-    airflow_username = os.getenv("AIRFLOW_API_USERNAME", "").strip()
-    airflow_password = os.getenv("AIRFLOW_API_PASSWORD", "").strip()
-    if airflow_username and airflow_password:
-        encoded_token = base64.b64encode(f"{airflow_username}:{airflow_password}".encode("utf-8")).decode("utf-8")
-        api_request.add_header("Authorization", f"Basic {encoded_token}")
-
-    try:
-        with request.urlopen(api_request, timeout=20) as response:
-            response_body = response.read().decode("utf-8")
-            parsed_body = json.loads(response_body) if response_body else {}
-            return {"ok": True, "status": response.status, "data": parsed_body}
-    except error.HTTPError as http_error:
-        error_body = http_error.read().decode("utf-8", errors="ignore")
-        return {"ok": False, "status": http_error.code, "message": error_body or str(http_error)}
-    except Exception as exc:
-        return {"ok": False, "message": str(exc)}
 
 
 def create_schedule_payload(
@@ -228,6 +205,8 @@ def create_schedule_payload(
     sheet_id: str,
     spreadsheet_title: str,
     cron_expression: str,
+    yaml_path: Path,
+    generated_dag_path: Path,
 ) -> dict[str, Any]:
     dag_id = build_dag_id(template_name, sheet_id)
     created_at = datetime.datetime.now().isoformat(timespec="seconds")
@@ -239,16 +218,51 @@ def create_schedule_payload(
         "sheet_name": template_name,
         "spreadsheet_url": build_spreadsheet_url(sheet_id),
         "cron_expression": cron_expression,
+        "table": templatequery.get_table(template_name),
+        "dags_refresh": templatequery.get_dags_refresh(template_name),
+        "yaml_path": str(yaml_path),
+        "generated_dag_path": str(generated_dag_path),
         "created_at": created_at,
     }
 
 
-def sync_schedule_to_airflow(schedule_payload: dict[str, Any]) -> dict[str, Any]:
-    return call_airflow_schedule_api("POST", "/report-schedules", schedule_payload)
+def generate_dag_artifacts(
+    template_name: str,
+    sheet_id: str,
+    spreadsheet_name: str,
+    cron_expression: str,
+    project: str = "hijack-sandal",
+) -> tuple[Path, Path]:
+    dag_id = build_dag_id(template_name, sheet_id)
+    yaml_path = create_dags_yaml(
+        config_dir=CONFIG_DIR,
+        file_name=f"{dag_id}.yaml",
+        schedule=cron_expression,
+        project=project,
+        template_name=template_name,
+        table=templatequery.get_table(template_name) or "",
+        dags_refresh=templatequery.get_dags_refresh_items(template_name),
+        description=templatequery.get_description(template_name),
+        spreadsheet_id=sheet_id,
+        sheet_name = template_name,
+        spreadsheet_title=spreadsheet_name,
+    )
+    runpy.run_path(str(ROOT_DIR / "template" / "generate_dags.py"), run_name="__main__") # Run python func
+    generated_dag_path = ROOT_DIR / "dags" / f"gen_{dag_id}.py"
+    return yaml_path, generated_dag_path
 
 
-def delete_schedule_from_airflow(dag_id: str) -> dict[str, Any]:
-    return call_airflow_schedule_api("DELETE", f"/report-schedules/{dag_id}")
+def remove_generated_schedule_files(schedule_payload: dict[str, Any]) -> list[str]:
+    removed_paths: list[str] = []
+    for key in ["yaml_path", "generated_dag_path"]:
+        raw_path = schedule_payload.get(key)
+        if not raw_path:
+            continue
+        target_path = Path(str(raw_path))
+        if target_path.exists():
+            target_path.unlink()
+            removed_paths.append(str(target_path))
+    return removed_paths
 
 
 def render_schedule_detail(schedule_payload: dict[str, Any]):
@@ -256,9 +270,13 @@ def render_schedule_detail(schedule_payload: dict[str, Any]):
         {"Field": "DAG Name", "Value": schedule_payload.get("dag_id", "-")},
         {"Field": "Trigger Cron", "Value": schedule_payload.get("cron_expression", "-")},
         {"Field": "Created At", "Value": schedule_payload.get("created_at", "-")},
+        {"Field": "Table", "Value": schedule_payload.get("table", "-")},
+        {"Field": "DAG Refresh", "Value": ", ".join(schedule_payload.get("dags_refresh", [])) or "-"},
         {"Field": "Spreadsheet", "Value": schedule_payload.get("spreadsheet_title", "-")},
         {"Field": "Target URL", "Value": schedule_payload.get("spreadsheet_url", "-")},
         {"Field": "Updated Sheet", "Value": schedule_payload.get("sheet_name", "-")},
+        {"Field": "YAML Config", "Value": schedule_payload.get("yaml_path", "-")},
+        {"Field": "Generated DAG", "Value": schedule_payload.get("generated_dag_path", "-")},
     ]
     st.dataframe(detail_rows, hide_index=True, use_container_width=True)
 
@@ -324,7 +342,7 @@ def report_manage():
                                 st.code(result["query"], language="sql")
 
     with setschadule_tab:
-        st.markdown("Generate one template sheet, overwrite it if it already exists, then register the schedule.")
+        st.markdown("Generate one template sheet, overwrite it if it already exists, then generate the DAG YAML and DAG file.")
         selected_schedule_report_id = render_spreadsheet_selector(gdrive_sheet, "schedule")
 
         selected_template_table = st.selectbox(
@@ -335,63 +353,78 @@ def report_manage():
         )
 
         if selected_template_table:
-            st.caption(templatequery.get_description(selected_template_table))
+            st.markdown(f"Description: `{templatequery.get_description(selected_template_table)}`")
+            # DEBUG : 
+            # st.markdown(f"Table source: `{templatequery.get_table(selected_template_table) or '-'}`")
+            # st.markdown(
+            #     f"DAG refresh dependencies: `{', '.join(templatequery.get_dags_refresh(selected_template_table)) or '-'}`"
+            # )
 
         schedule_time = st.time_input("Set Time for Data Refresh", datetime.time(9, 0), key="schadule_time")
         cron_time = time_to_cron(minute=schedule_time.minute, hour=schedule_time.hour)
         st.markdown(f"Schedule set for every day at `{schedule_time}` or cron `{cron_time}`.")
 
-        if selected_template_table:
+        if selected_template_table and templatequery.get_table(selected_template_table):
             preview_query, preview_dataframe = preview_template_query(selected_template_table)
             st.markdown("**Data shown is limited to 20 rows**")
             st.dataframe(preview_dataframe, use_container_width=True)
             with st.expander("Show Generated SQL"):
                 st.code(preview_query, language="sql")
+        elif selected_template_table:
+            st.warning("This template does not have a source table yet.")
 
         if st.button("Generate & Set Schedule", type="primary", use_container_width=True):
             if not selected_schedule_report_id:
                 st.error("Please choose the spreadsheet target first.")
             elif not selected_template_table:
                 st.error("Please choose one template first.")
+            elif not templatequery.get_table(selected_template_table):
+                st.error("Selected template does not define a source table.")
             else:
-                with st.spinner("Generating sheet and saving schedule..."):
-                    spreadsheet = client.open_by_key(selected_schedule_report_id)
-                    spreadsheet_title = spreadsheet.fetch_sheet_metadata()["properties"]["title"]
+                try:
+                    with st.spinner("Generating sheet, YAML config, and DAG file..."):
+                        spreadsheet = client.open_by_key(selected_schedule_report_id)
+                        spreadsheet_title = spreadsheet.fetch_sheet_metadata()["properties"]["title"]
 
-                    sheetdrive.get_or_create_sheet(
-                        spreadsheet_id=selected_schedule_report_id,
-                        sheet_name=selected_template_table,
-                    )
+                        sheetdrive.get_or_create_sheet(
+                            spreadsheet_id=selected_schedule_report_id,
+                            sheet_name=selected_template_table,
+                        )
 
-                    generated_data = run_template_query(selected_template_table)
-                    sheetdrive.update_gsheet(
-                        spreadsheet_id=selected_schedule_report_id,
-                        file_name=spreadsheet_title,
-                        dataframe=generated_data,
-                        sheet_name=selected_template_table,
-                        overwrite=True,
-                        open_browser=False,
-                    )
+                        generated_data = run_template_query(selected_template_table)
+                        sheetdrive.update_gsheet(
+                            spreadsheet_id=selected_schedule_report_id,
+                            file_name=spreadsheet_title,
+                            dataframe=generated_data,
+                            sheet_name=selected_template_table,
+                            overwrite=True,
+                            open_browser=False,
+                        )
 
-                    schedule_payload = create_schedule_payload(
-                        template_name=selected_template_table,
-                        sheet_id=selected_schedule_report_id,
-                        spreadsheet_title=spreadsheet_title,
-                        cron_expression=cron_time,
-                    )
-                    airflow_result = sync_schedule_to_airflow(schedule_payload)
-                    schedule_payload["airflow_status"] = "synced" if airflow_result.get("ok") else "local_only"
-                    schedule_payload["airflow_message"] = airflow_result.get("message", "")
-                    upsert_schedule_registry(schedule_payload)
-
-                st.success(
-                    f"Sheet `{selected_template_table}` generated in `{spreadsheet_title}` and schedule `{schedule_payload['dag_id']}` saved."
-                )
-                st.markdown(f"[Open spreadsheet]({schedule_payload['spreadsheet_url']})")
-                if airflow_result.get("ok"):
-                    st.info("Airflow API call completed successfully.")
+                        yaml_path, generated_dag_path = generate_dag_artifacts(
+                            template_name=selected_template_table,
+                            sheet_id=selected_schedule_report_id,
+                            cron_expression=cron_time,
+                            spreadsheet_name=spreadsheet_title,
+                        )
+                        schedule_payload = create_schedule_payload(
+                            template_name=selected_template_table,
+                            sheet_id=selected_schedule_report_id,
+                            spreadsheet_title=spreadsheet_title,
+                            cron_expression=cron_time,
+                            yaml_path=yaml_path,
+                            generated_dag_path=generated_dag_path,
+                        )
+                        # upsert_schedule_registry(schedule_payload)
+                except Exception as exc:
+                    st.error(f"Failed to generate schedule assets: {exc}")
                 else:
-                    st.info(schedule_payload["airflow_message"] or "Schedule metadata was saved locally.")
+                    st.success(
+                        f"Sheet `{selected_template_table}` generated in `{spreadsheet_title}` and DAG `{schedule_payload['dag_id']}` saved."
+                    )
+                    st.markdown(f"[Open spreadsheet]({schedule_payload['spreadsheet_url']})")
+                    st.info(f"Config file: `{yaml_path.name}`")
+                    st.info(f"DAG file: `{generated_dag_path.name}`")
 
         st.caption("DAG naming format follows `template_name + sheet_id`.")
 
@@ -408,14 +441,11 @@ def report_manage():
 
             render_schedule_detail(selected_schedule)
             if st.button("Delete Selected Schedule", type="primary", use_container_width=True):
-                airflow_delete_result = delete_schedule_from_airflow(selected_dag_id)
+                removed_paths = remove_generated_schedule_files(selected_schedule)
                 delete_schedule_registry(selected_dag_id)
-                if airflow_delete_result.get("ok"):
-                    st.success(f"Schedule `{selected_dag_id}` deleted.")
-                else:
-                    st.success(f"Schedule `{selected_dag_id}` removed from the local registry.")
-                    if airflow_delete_result.get("message"):
-                        st.info(airflow_delete_result["message"])
+                st.success(f"Schedule `{selected_dag_id}` removed from the local registry.")
+                if removed_paths:
+                    st.info("Deleted generated files:\n" + "\n".join(removed_paths))
                 st.rerun()
 
 

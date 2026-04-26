@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import json
 import os
 from pathlib import Path
+import yaml
 import ExtractPage
 import ReportManagerPage
 from plugin.postgre.QueryBuilder import ReadTemplate
@@ -16,6 +17,8 @@ from plugin.postgre.QueryBuilder import ReadTemplate
 APP_DIR = Path(__file__).resolve().parent
 ROOT_DIR = APP_DIR.parent
 CONFIG_DIR = APP_DIR / "config"
+GENERATED_CONFIG_DIR = ROOT_DIR / "config"
+GENERATED_DAGS_DIR = ROOT_DIR / "dags"
 APP_CONFIG_PATH = CONFIG_DIR / "app_config.json"
 ENV_PATH = ROOT_DIR / ".env"
 LOGO_PATH = APP_DIR / "img" / "Logo.png"
@@ -28,6 +31,83 @@ ADMIN_PAGES = BASE_PAGES + ["Config"]
 USR_PAGES = [page for page in BASE_PAGES if page not in ["Dashboard", "Analyze"]]
 
 DEFAULT_CONFIG = {}
+
+
+def parse_dags_refresh_input(raw_value: str):
+    if not raw_value.strip():
+        return []
+
+    try:
+        parsed_value = yaml.safe_load(raw_value)
+    except yaml.YAMLError:
+        separators_normalized = raw_value.replace(",", "\n")
+        parsed_value = [item.strip() for item in separators_normalized.splitlines() if item.strip()]
+
+    return TEMPLATE_QUERY.normalize_dags_refresh_items(parsed_value)
+
+
+def format_dags_refresh_items(items) -> str:
+    if not items:
+        return ""
+    return yaml.safe_dump(items, sort_keys=False).strip()
+
+
+def render_template_yaml_preview(template_name: str, table_name: str, description: str, dags_refresh_items):
+    preview_payload = {
+        template_name or "report_name": {
+            "description": description or "Template description",
+            "table": table_name or "target_table_name",
+            "dags_refresh": dags_refresh_items or [
+                {
+                    "dag_id": "dealpos_fact_inventory_hourly",
+                    "loader_key": "fact_inventory",
+                    "external_task_id": "load_fact_inventory",
+                }
+            ],
+        }
+    }
+    st.code(yaml.safe_dump(preview_payload, sort_keys=False), language="yaml")
+
+
+@st.cache_data(ttl=300)
+def get_available_template_views():
+    return TEMPLATE_QUERY.list_available_views()
+
+
+def list_deletable_report_dags():
+    if not GENERATED_DAGS_DIR.exists():
+        return []
+
+    return sorted(
+        [
+            dag_path
+            for dag_path in GENERATED_DAGS_DIR.glob("*.py")
+            if "report" in dag_path.name.lower()
+        ],
+        key=lambda dag_path: dag_path.name.lower(),
+    )
+
+
+def get_related_report_config_path(dag_path: Path):
+    config_stem = dag_path.stem.removeprefix("gen_")
+    return GENERATED_CONFIG_DIR / f"{config_stem}.yaml"
+
+
+def delete_report_dag_artifacts(dag_filename: str):
+    selected_dag_path = next(
+        (dag_path for dag_path in list_deletable_report_dags() if dag_path.name == dag_filename),
+        None,
+    )
+    if selected_dag_path is None:
+        return None, None
+
+    related_config_path = get_related_report_config_path(selected_dag_path)
+    had_related_config = related_config_path.exists()
+    selected_dag_path.unlink(missing_ok=True)
+    if had_related_config:
+        related_config_path.unlink()
+
+    return selected_dag_path, related_config_path if had_related_config else None
 
 
 def ensure_app_config():
@@ -216,52 +296,177 @@ def render_config_page():
 
     st.markdown("---")
     
-    st.subheader("Add or Update Template Query")
-    tab_create_new_template, template_existing, delete_existing = st.tabs(["Tab Create New Template", "Update Existing Data","Delete Existing Template"])
-    with tab_create_new_template :
-        templatename_new = st.text_input("Input New Template Name",value=None,key="config_new_template")
-        query_new = st.text_area("Input New Query",value=None,key="config_new_query",height=120,)
-        description_new = st.text_input("Input Description for this Template",value=None,key="config_new_description")
+    st.subheader("Add or Update Template Config")
+    tab_create_new_template, template_existing, delete_existing = st.tabs(
+        ["Create Template", "Update Existing Data", "Delete Existing Template"]
+    )
+    default_dags_refresh_text = yaml.safe_dump(
+        [
+            {
+                "dag_id": "dealpos_fact_invoice_line_hourly",
+                "loader_key": "fact_invoice_line",
+                "external_task_id": "load_fact_invoice_line",
+            },
+            {
+                "dag_id": "dealpos_variant_data_hourly",
+                "loader_key": "variant_data",
+                "external_task_id": "load_variant_data",
+            },
+        ],
+        sort_keys=False,
+    ).strip()
 
-        if st.button("Add New Template",type="primary",disabled=(True if templatename_new is None and query_new is None and description_new is None else False)):
-            TEMPLATE_QUERY.upsert_query(
+    with tab_create_new_template :
+        available_template_views = get_available_template_views()
+        templatename_new = st.text_input("Input New Template Name",value=None,key="config_new_template")
+        table_new = st.selectbox(
+            "Select Source View",
+            options=[""] + available_template_views,
+            key="config_new_table",
+            help="Only views from information_schema for the current app schema are shown here.",
+        )
+        if available_template_views:
+            st.caption(f"{len(available_template_views)} view(s) available from the database schema.")
+        else:
+            st.warning("No source views were found from information_schema. Check the database connection or schema.")
+        description_new = st.text_input("Input Description for this Template",value=None,key="config_new_description")
+        dags_refresh_new = st.text_area(
+            "Input DAG Refresh List",
+            value=default_dags_refresh_text,
+            key="config_new_dags_refresh",
+            height=180,
+            help="Use YAML list items with dag_id / loader_key / external_task_id.",
+        )
+        parsed_new_dags_refresh = parse_dags_refresh_input(dags_refresh_new) if dags_refresh_new else []
+        st.caption("Template YAML preview")
+        render_template_yaml_preview(
+            templatename_new or "",
+            table_new or "",
+            description_new or "",
+            parsed_new_dags_refresh,
+        )
+
+        if st.button(
+            "Add New Template",
+            type="primary",
+            disabled=(True if not templatename_new or not table_new else False),
+        ):
+            TEMPLATE_QUERY.upsert_template(
                 template_name= st.session_state.config_new_template,
-                query = st.session_state.config_new_query,
-                description= st.session_state.config_new_description
+                table=st.session_state.config_new_table,
+                description= st.session_state.config_new_description,
+                dags_refresh=parse_dags_refresh_input(st.session_state.config_new_dags_refresh),
             )
             st.success(f"Template `{templatename_new}` Added.")
 
 
     with template_existing:
         template = st.selectbox("Select Template Query",options=[""]+TEMPLATE_QUERY.list_templates(),key="config_update_template")
-        query_old = TEMPLATE_QUERY.get_query(template_name=template)
+        table_old = TEMPLATE_QUERY.get_table(template_name=template)
         description = TEMPLATE_QUERY.get_description(template_name=template)
-        if template != None and query_old != None and description != None :
-            st.code(f"Query : \n {query_old} \n Description : {description}",language="sql")
+        dags_refresh_old = TEMPLATE_QUERY.get_dags_refresh_items(template_name=template)
+        dags_refresh_old_text = format_dags_refresh_items(dags_refresh_old)
+        if st.session_state.get("config_update_template_loaded") != template:
+            st.session_state["config_update_template_loaded"] = template
+            st.session_state["config_update_table"] = table_old or ""
+            st.session_state["config_update_description"] = description or ""
+            st.session_state["config_update_dags_refresh"] = dags_refresh_old_text
+        if template and (table_old or TEMPLATE_QUERY.get_query(template_name=template)):
+            st.code(
+                "\n".join(
+                    [
+                        f"Table : {table_old or '-'}",
+                        f"Description : {description}",
+                        "DAG Refresh :",
+                        yaml.safe_dump(dags_refresh_old, sort_keys=False).strip() if dags_refresh_old else "-",
+                    ]
+                ),
+                language="yaml",
+            )
         
-        query_new = st.text_area("Input New Query",key="config_update_query",height=120,) or query_old
+        table_new = st.text_input("Input Source Table",key="config_update_table") or table_old
         description_new = st.text_input("Input Description for this Template",key="config_update_description") or description
+        dags_refresh_new = st.text_area(
+            "Input DAG Refresh List",
+            key="config_update_dags_refresh",
+            height=180,
+            placeholder="- dag_id: dealpos_fact_inventory_hourly\n  loader_key: fact_inventory\n  external_task_id: load_fact_inventory",
+        )
+        selected_dags_refresh = parse_dags_refresh_input(dags_refresh_new) if dags_refresh_new else dags_refresh_old
+        st.caption("Updated template YAML preview")
+        render_template_yaml_preview(
+            template or "",
+            table_new or "",
+            description_new or "",
+            selected_dags_refresh,
+        )
 
-        if st.button("Update New Template",type="primary",disabled=(True if template=="" and (query_new is None or description_new is None) else False)):
-            TEMPLATE_QUERY.upsert_query(
+        if st.button("Update Template",type="primary",disabled=(True if template=="" or not table_new else False)):
+            TEMPLATE_QUERY.upsert_template(
                 template_name= st.session_state.config_update_template,
-                query = query_new,
-                description= description_new
+                table=table_new,
+                description= description_new,
+                dags_refresh=selected_dags_refresh,
             )
             st.success(f"Template `{template}` Updated.")
 
     with delete_existing:
         template = st.selectbox("Select Template Query",options=[""]+TEMPLATE_QUERY.list_templates(),key="config_delete_template")
-        query_old = TEMPLATE_QUERY.get_query(template_name=template)
+        table_old = TEMPLATE_QUERY.get_table(template_name=template)
         description = TEMPLATE_QUERY.get_description(template_name=template)
-        if template != None and query_old != None and description != None :
-            st.code(f"Query : \n {query_old} \n Description : {description}",language="sql")
+        dags_refresh_old = TEMPLATE_QUERY.get_dags_refresh_items(template_name=template)
+        if template and (table_old or TEMPLATE_QUERY.get_query(template_name=template)):
+            st.code(
+                "\n".join(
+                    [
+                        f"Table : {table_old or '-'}",
+                        f"Description : {description}",
+                        "DAG Refresh :",
+                        yaml.safe_dump(dags_refresh_old, sort_keys=False).strip() if dags_refresh_old else "-",
+                    ]
+                ),
+                language="yaml",
+            )
 
         if st.button("Delete Template",type="primary",disabled=(True if template=="" else False)):
             TEMPLATE_QUERY.delete_query(
                 template_name=st.session_state.config_delete_template
             )
             st.success(f"Template `{template}` Deleted.")
+
+        st.divider()
+        st.subheader("Delete Generated Report DAG")
+        deletable_report_dags = list_deletable_report_dags()
+        selected_report_dag = st.selectbox(
+            "Select Generated Report DAG",
+            options=[""] + [dag_path.name for dag_path in deletable_report_dags],
+            key="config_delete_report_dag",
+        )
+        if selected_report_dag:
+            selected_report_dag_path = GENERATED_DAGS_DIR / selected_report_dag
+            related_report_config_path = get_related_report_config_path(selected_report_dag_path)
+            st.code(
+                "\n".join(
+                    [
+                        f"DAG File : {selected_report_dag_path}",
+                        f"Related YAML : {related_report_config_path if related_report_config_path.exists() else '-'}",
+                    ]
+                ),
+                language="text",
+            )
+        elif not deletable_report_dags:
+            st.caption("No generated DAG files containing `report` were found in `/dags`.")
+
+        if st.button("Delete Selected Report DAG", type="primary", disabled=not selected_report_dag):
+            deleted_dag_path, deleted_config_path = delete_report_dag_artifacts(selected_report_dag)
+            if deleted_dag_path is None:
+                st.error("Selected DAG is no longer available.")
+            else:
+                deleted_paths = [str(deleted_dag_path)]
+                if deleted_config_path is not None:
+                    deleted_paths.append(str(deleted_config_path))
+                st.success("Deleted:\n" + "\n".join(deleted_paths))
+                st.rerun()
 
 
 

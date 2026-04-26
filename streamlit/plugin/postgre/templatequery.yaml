@@ -1,12 +1,16 @@
-report_product:
-  description: Aggregated product sales, cost, and inventory metrics by product.
-  query: "SELECT\n    dp.category AS category,\n    dp.name AS name,\n    dp.code AS code,\n    '' AS brand,\n    SUM(fil.quantity) AS quantity,\n    SUM(fil.price_original * fil.quantity) AS gross,\n    SUM(fil.net_sales) AS sales,\n    SUM(fil.tax) AS tax,\n    SUM(fil.net_sales + fil.tax) AS sales_plus_tax,\n    COALESCE(SUM(fi.available), 0) AS units_in_stock,\n    COALESCE(SUM(dv.unit_price * fil.quantity), 0) AS unit_cost,\n    SUM(fil.net_sales) - SUM(COALESCE(dv.unit_price, 0) * fil.quantity) AS profit,\n    dp.product_id AS id,\n    SPLIT_PART(dp.name, ' ', 1) AS others\nFROM fact_invoice_line fil\nLEFT JOIN dim_variant dv ON fil.variant_id = dv.variant_id\nLEFT JOIN dim_product dp ON dv.product_id = dp.product_id\nLEFT JOIN dim_variant_data dvd ON fil.variant_id = dvd.variant_id\nLEFT JOIN fact_inventory fi ON dv.code = fi.variant_code\nGROUP BY dp.category, dp.name, dp.code, dp.product_id\nORDER BY sales DESC;\n"
-template2:
-  description: Full extract from dm_dissnuts for general reporting.
-  query: SELECT * FROM dm_dissnuts
-template3:
-  description: Alternative full extract from dm_dissnuts.
-  query: SELECT * FROM dm_dissnuts
-'{TEMPLATE}':
-  description: Example placeholder for adding new templates.
-  query: '{QUERY}'
+reportproduct:
+  description: Monthly product transfer summary by outlet and month.
+  table: report_product_performance
+  dags_refresh:
+    - dag_id: dealpos_fact_invoice_line_hourly
+      loader_key: fact_invoice_line
+      external_task_id: load_fact_invoice_line
+    - dag_id: dealpos_variant_data_hourly
+      loader_key: variant_data
+      external_task_id: load_variant_data
+    - dag_id: dealpos_products_hourly
+      loader_key: products
+      external_task_id: load_products
+    - dag_id: dealpos_fact_inventory_hourly
+      loader_key: fact_inventory
+      external_task_id: load_fact_inventory
