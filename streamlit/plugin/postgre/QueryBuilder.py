@@ -53,7 +53,7 @@ def resolve_env_path(env_key: str, default: str) -> Path:
 
 user = get_env_value("ETL_DB_USER", default=None)
 password = get_env_value("ETL_DB_PASSWORD", default=None)
-host = get_env_value( "POSTGRES_HOST", default=None)
+host = get_env_value( "ETL_DB_HOST", default=None)
 port = get_env_value("ETL_DB_PORT",  default=None)
 database = get_env_value("ETL_DB_NAME", default="postgres")
 

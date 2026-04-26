@@ -92,7 +92,7 @@ def create_dags_yaml(
                 "name": trigger_task_name,
                 "type": "triggerDagRun",
                 "trigger_dag_id": dag_id,
-                "wait_for_completion": False,
+                "wait_for_completion": True,
                 "reset_dag_run": False,
                 "depends_on": [],
             }
