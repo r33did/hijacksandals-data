@@ -27,6 +27,12 @@ ENV_PATH = ROOT_DIR / ".env"
 
 load_dotenv(ENV_PATH)
 
+REPORT_MANAGER_SECTIONS = [
+    "Refresh Data",
+    "Generate & Set Schedule",
+    "Delete Schedule",
+]
+
 
 @st.cache_data(ttl=300)
 def get_report_list(folder_id: str):
@@ -47,10 +53,22 @@ def init_session_state():
     defaults = {
         "refresh_use_url": False,
         "schedule_use_url": False,
+        "report_manager_active_section": REPORT_MANAGER_SECTIONS[0],
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def set_active_report_section(section_name: str):
+    st.session_state["report_manager_active_section"] = section_name
+
+
+def get_report_section_order() -> list[str]:
+    active_section = st.session_state.get("report_manager_active_section", REPORT_MANAGER_SECTIONS[0])
+    if active_section not in REPORT_MANAGER_SECTIONS:
+        active_section = REPORT_MANAGER_SECTIONS[0]
+    return [active_section] + [section for section in REPORT_MANAGER_SECTIONS if section != active_section]
 
 
 def ensure_schedule_registry():
@@ -155,6 +173,8 @@ def render_spreadsheet_selector(report_options: dict[str, str], state_prefix: st
                 "Input Report Url or Spreadsheet ID",
                 placeholder="https://docs.google.com/spreadsheets/d/{ID}/edit",
                 key=f"{state_prefix}_spreadsheet_input",
+                on_change=set_active_report_section,
+                args=("Refresh Data" if state_prefix == "refresh" else "Generate & Set Schedule",),
             )
             selected_report_id = parse_spreadsheet_id(input_value)
             if input_value and not selected_report_id:
@@ -165,6 +185,8 @@ def render_spreadsheet_selector(report_options: dict[str, str], state_prefix: st
                     "Select Report",
                     options=option_names,
                     key=f"{state_prefix}_spreadsheet_select",
+                    on_change=set_active_report_section,
+                    args=("Refresh Data" if state_prefix == "refresh" else "Generate & Set Schedule",),
                 )
                 selected_report_id = report_options.get(selected_report_name)
             else:
@@ -182,6 +204,8 @@ def render_spreadsheet_selector(report_options: dict[str, str], state_prefix: st
             "Input by URL",
             key=f"{state_prefix}_use_url",
             help="Turn on if you want to paste the spreadsheet URL directly.",
+            on_change=set_active_report_section,
+            args=("Refresh Data" if state_prefix == "refresh" else "Generate & Set Schedule",),
         )
 
     return selected_report_id
@@ -290,15 +314,20 @@ def report_manage():
     render_template_context()
 
     gdrive_sheet = get_report_list(sheetdrive.main_id)
-    refresh_tab, setschadule_tab, delete_schadule_tab = st.tabs(
-        ["Refresh Data", "Generate & Set Schedule", "Delete Schedule"]
-    )
+    ordered_sections = get_report_section_order()
+    rendered_tabs = dict(zip(ordered_sections, st.tabs(ordered_sections)))
 
-    with refresh_tab:
+    with rendered_tabs["Refresh Data"]:
         st.markdown("Update worksheet tabs that already match template names.")
         selected_refresh_report_id = render_spreadsheet_selector(gdrive_sheet, "refresh")
 
-        if st.button("Start Update", type="primary", use_container_width=True):
+        if st.button(
+            "Start Update",
+            type="primary",
+            use_container_width=True,
+            on_click=set_active_report_section,
+            args=("Refresh Data",),
+        ):
             if not selected_refresh_report_id:
                 st.error("Please choose a spreadsheet first.")
             else:
@@ -343,7 +372,7 @@ def report_manage():
                             with st.expander("Show Generated SQL"):
                                 st.code(result["query"], language="sql")
 
-    with setschadule_tab:
+    with rendered_tabs["Generate & Set Schedule"]:
         st.markdown("Generate one template sheet, overwrite it if it already exists, then generate the DAG YAML and DAG file.")
         selected_schedule_report_id = render_spreadsheet_selector(gdrive_sheet, "schedule")
 
@@ -352,6 +381,8 @@ def report_manage():
             options=[""] + templatequery.list_templates(),
             key="selected_template",
             placeholder="Template will be shown below",
+            on_change=set_active_report_section,
+            args=("Generate & Set Schedule",),
         )
 
         if selected_template_table:
@@ -362,7 +393,13 @@ def report_manage():
             #     f"DAG refresh dependencies: `{', '.join(templatequery.get_dags_refresh(selected_template_table)) or '-'}`"
             # )
 
-        schedule_time = st.time_input("Set Time for Data Refresh", datetime.time(9, 0), key="schadule_time")
+        schedule_time = st.time_input(
+            "Set Time for Data Refresh",
+            datetime.time(9, 0),
+            key="schadule_time",
+            on_change=set_active_report_section,
+            args=("Generate & Set Schedule",),
+        )
         cron_time = time_to_cron(minute=schedule_time.minute, hour=schedule_time.hour)
         st.markdown(f"Schedule set for every day at `{schedule_time}` or cron `{cron_time}`.")
 
@@ -375,7 +412,13 @@ def report_manage():
         elif selected_template_table:
             st.warning("This template does not have a source table yet.")
 
-        if st.button("Generate & Set Schedule", type="primary", use_container_width=True):
+        if st.button(
+            "Generate & Set Schedule",
+            type="primary",
+            use_container_width=True,
+            on_click=set_active_report_section,
+            args=("Generate & Set Schedule",),
+        ):
             if not selected_schedule_report_id:
                 st.error("Please choose the spreadsheet target first.")
             elif not selected_template_table:
@@ -430,7 +473,7 @@ def report_manage():
 
         st.caption("DAG naming format follows `template_name + sheet_id`.")
 
-    with delete_schadule_tab:
+    with rendered_tabs["Delete Schedule"]:
         st.markdown("Select an existing DAG to review its details or remove it.")
         schedules = load_schedule_registry()
 
@@ -438,11 +481,22 @@ def report_manage():
             st.info("No saved schedule is available yet.")
         else:
             dag_ids = [item["dag_id"] for item in schedules]
-            selected_dag_id = st.selectbox("Scheduled DAG", options=dag_ids)
+            selected_dag_id = st.selectbox(
+                "Scheduled DAG",
+                options=dag_ids,
+                on_change=set_active_report_section,
+                args=("Delete Schedule",),
+            )
             selected_schedule = next(item for item in schedules if item["dag_id"] == selected_dag_id)
 
             render_schedule_detail(selected_schedule)
-            if st.button("Delete Selected Schedule", type="primary", use_container_width=True):
+            if st.button(
+                "Delete Selected Schedule",
+                type="primary",
+                use_container_width=True,
+                on_click=set_active_report_section,
+                args=("Delete Schedule",),
+            ):
                 removed_paths = remove_generated_schedule_files(selected_schedule)
                 delete_schedule_registry(selected_dag_id)
                 st.success(f"Schedule `{selected_dag_id}` removed from the local registry.")
