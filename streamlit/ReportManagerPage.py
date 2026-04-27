@@ -32,11 +32,24 @@ REPORT_MANAGER_SECTIONS = [
     "Generate & Set Schedule",
     "Delete Schedule",
 ]
+SCHEDULE_TARGET_MODES = [
+    "Copy from Template Drive",
+    "Use Existing Spreadsheet ID",
+]
+SCHEDULE_DESTINATION_MODES = [
+    "Default Folder Directory",
+    "Manual Drive Folder ID",
+]
 
 
 @st.cache_data(ttl=300)
 def get_report_list(folder_id: str):
     return dict(sheetdrive.list_folder(folder_id=folder_id))
+
+
+@st.cache_data(ttl=300)
+def get_template_report_list():
+    return dict(sheetdrive.list_folder(folder_id=sheetdrive.template_id, include=".*"))
 
 
 def time_to_cron(
@@ -53,6 +66,8 @@ def init_session_state():
     defaults = {
         "refresh_use_url": False,
         "schedule_use_url": False,
+        "schedule_target_mode": SCHEDULE_TARGET_MODES[0],
+        "schedule_destination_mode": SCHEDULE_DESTINATION_MODES[0],
         "report_manager_active_section": REPORT_MANAGER_SECTIONS[0],
     }
     for key, value in defaults.items():
@@ -209,6 +224,34 @@ def render_spreadsheet_selector(report_options: dict[str, str], state_prefix: st
         )
 
     return selected_report_id
+
+
+def render_schedule_destination_folder_selector() -> str | None:
+    destination_mode = st.radio(
+        "Destination Folder",
+        options=SCHEDULE_DESTINATION_MODES,
+        horizontal=True,
+        key="schedule_destination_mode",
+        on_change=set_active_report_section,
+        args=("Generate & Set Schedule",),
+    )
+
+    if destination_mode == SCHEDULE_DESTINATION_MODES[0]:
+        default_folder_id = (sheetdrive.main_id or "").strip()
+        if default_folder_id:
+            st.caption(f"Using default folder ID: `{default_folder_id}`")
+            return default_folder_id
+        st.warning("Default Drive folder ID is not configured yet.")
+        return None
+
+    manual_folder_id = st.text_input(
+        "Input Drive Folder ID",
+        placeholder="Folder ID from Google Drive",
+        key="schedule_destination_folder_id",
+        on_change=set_active_report_section,
+        args=("Generate & Set Schedule",),
+    )
+    return (manual_folder_id or "").strip() or None
 
 
 def run_template_query(template_name: str) -> pd.DataFrame:
@@ -374,7 +417,54 @@ def report_manage():
 
     with rendered_tabs["Generate & Set Schedule"]:
         st.markdown("Generate one template sheet, overwrite it if it already exists, then generate the DAG YAML and DAG file.")
-        selected_schedule_report_id = render_spreadsheet_selector(gdrive_sheet, "schedule")
+        schedule_target_mode = st.radio(
+            "Target Method",
+            options=SCHEDULE_TARGET_MODES,
+            horizontal=True,
+            key="schedule_target_mode",
+            on_change=set_active_report_section,
+            args=("Generate & Set Schedule",),
+        )
+
+        selected_schedule_report_id = None
+        selected_template_source_name = None
+        selected_template_source_id = None
+
+        if schedule_target_mode == SCHEDULE_TARGET_MODES[0]:
+            template_drive_files = get_template_report_list()
+            template_file_names = sorted(template_drive_files.keys())
+
+            selected_template_source_name = st.selectbox(
+                "Select Template Spreadsheet",
+                options=template_file_names if template_file_names else ["No template spreadsheet found"],
+                disabled=not template_file_names,
+                key="schedule_template_source_name",
+                on_change=set_active_report_section,
+                args=("Generate & Set Schedule",),
+            )
+            if template_file_names:
+                selected_template_source_id = template_drive_files.get(selected_template_source_name)
+
+            st.text_input(
+                "Copied Spreadsheet Title",
+                placeholder="Leave blank to reuse the template spreadsheet name",
+                key="schedule_copied_spreadsheet_name",
+                on_change=set_active_report_section,
+                args=("Generate & Set Schedule",),
+            )
+            destination_folder_id = render_schedule_destination_folder_selector()
+        else:
+            manual_schedule_input = st.text_input(
+                "Input Report URL or Spreadsheet ID",
+                placeholder="https://docs.google.com/spreadsheets/d/{ID}/edit",
+                key="schedule_manual_spreadsheet_input",
+                on_change=set_active_report_section,
+                args=("Generate & Set Schedule",),
+            )
+            selected_schedule_report_id = parse_spreadsheet_id(manual_schedule_input)
+            if manual_schedule_input and not selected_schedule_report_id:
+                st.warning("Spreadsheet ID could not be read from the input.")
+            destination_folder_id = None
 
         selected_template_table = st.selectbox(
             "Select Template",
@@ -419,8 +509,12 @@ def report_manage():
             on_click=set_active_report_section,
             args=("Generate & Set Schedule",),
         ):
-            if not selected_schedule_report_id:
-                st.error("Please choose the spreadsheet target first.")
+            if schedule_target_mode == SCHEDULE_TARGET_MODES[0] and not selected_template_source_id:
+                st.error("Please choose one template spreadsheet to copy first.")
+            elif schedule_target_mode == SCHEDULE_TARGET_MODES[0] and not destination_folder_id:
+                st.error("Please choose a destination Drive folder first.")
+            elif schedule_target_mode == SCHEDULE_TARGET_MODES[1] and not selected_schedule_report_id:
+                st.error("Please input the spreadsheet target first.")
             elif not selected_template_table:
                 st.error("Please choose one template first.")
             elif not templatequery.get_table(selected_template_table):
@@ -428,6 +522,15 @@ def report_manage():
             else:
                 try:
                     with st.spinner("Generating sheet, YAML config, and DAG file..."):
+                        if schedule_target_mode == SCHEDULE_TARGET_MODES[0]:
+                            copied_spreadsheet_name = (st.session_state.get("schedule_copied_spreadsheet_name") or "").strip()
+                            selected_schedule_report_id = sheetdrive.copy_template(
+                                file_name=selected_template_source_name,
+                                new_title=copied_spreadsheet_name or selected_template_source_name,
+                                destination_folder_id=destination_folder_id,
+                                template_file_id=selected_template_source_id,
+                            )
+
                         spreadsheet = client.open_by_key(selected_schedule_report_id)
                         spreadsheet_title = spreadsheet.fetch_sheet_metadata()["properties"]["title"]
 

@@ -191,10 +191,30 @@ class sheetdrive:
             if re.search(regex_filename, file_item["name"]):
                 return file_item["id"]
 
-    def copy_template(self, file_name: str, new_title: str):
+    def copy_template(
+        self,
+        file_name: str | None = None,
+        new_title: str | None = None,
+        destination_folder_id: str | None = None,
+        template_file_id: str | None = None,
+    ):
         drive_service = self.service()
-        file_metadata = {"name": new_title, "parents": [self.template_id]}
-        file_id = self.search_filename(file_name=file_name, folder_id=self.template_id)
+        target_folder_id = (destination_folder_id or self.main_id or self.template_id or "").strip()
+        if not target_folder_id:
+            raise ValueError("Drive destination folder ID is not configured.")
+
+        file_id = (template_file_id or "").strip()
+        if not file_id:
+            if not file_name:
+                raise ValueError("Template file name or template file ID is required.")
+            file_id = self.search_filename(file_name=file_name, folder_id=self.template_id)
+        if not file_id:
+            raise ValueError("Template spreadsheet could not be found in the template Drive folder.")
+
+        file_metadata = {
+            "name": (new_title or file_name or f"Copied_{datetime.now().strftime('%Y%m%d_%H%M%S')}").strip(),
+            "parents": [target_folder_id],
+        }
 
         copied_file = drive_service.files().copy(
             fileId=file_id,
