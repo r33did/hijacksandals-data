@@ -11,7 +11,6 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from gspread_dataframe import set_with_dataframe
 
 BASE_DIR = Path(__file__).resolve()
@@ -59,7 +58,6 @@ SERVICE_ACCOUNT = resolve_env_path("CREDS")
 
 main_id = os.getenv("GDRIVE_ID")
 template_id = os.getenv("TEMPLATE_ID")
-manual_parent_folder_id = os.getenv("MANUAL_PARENT_FOLDER_ID")
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -193,14 +191,6 @@ class sheetdrive:
             if re.search(regex_filename, file_item["name"]):
                 return file_item["id"]
 
-    def get_drive_file_metadata(self, file_id: str):
-        drive_service = self.service()
-        return drive_service.files().get(
-            fileId=file_id,
-            fields="id,name,mimeType,driveId,parents",
-            supportsAllDrives=True,
-        ).execute()
-
     def copy_template(
         self,
         file_name: str | None = None,
@@ -209,28 +199,9 @@ class sheetdrive:
         template_file_id: str | None = None,
     ):
         drive_service = self.service()
-        target_folder_id = (
-            destination_folder_id
-            or manual_parent_folder_id
-            or self.main_id
-            or self.template_id
-            or ""
-        ).strip()
+        target_folder_id = (destination_folder_id or self.main_id or self.template_id or "").strip()
         if not target_folder_id:
             raise ValueError("Drive destination folder ID is not configured.")
-
-        try:
-            target_folder_metadata = self.get_drive_file_metadata(target_folder_id)
-        except HttpError as exc:
-            raise RuntimeError(
-                f"Drive destination folder `{target_folder_id}` could not be accessed by the service account."
-            ) from exc
-
-        if not target_folder_metadata.get("driveId"):
-            raise RuntimeError(
-                "Google Drive copy requires a destination folder inside a Shared Drive when using the service account. "
-                f"Folder `{target_folder_metadata.get('name', target_folder_id)}` is not in a Shared Drive."
-            )
 
         file_id = (template_file_id or "").strip()
         if not file_id:
@@ -245,21 +216,11 @@ class sheetdrive:
             "parents": [target_folder_id],
         }
 
-        try:
-            copied_file = drive_service.files().copy(
-                fileId=file_id,
-                body=file_metadata,
-                supportsAllDrives=True,
-            ).execute()
-        except HttpError as exc:
-            error_text = str(exc)
-            if exc.resp.status == 403 and "storageQuotaExceeded" in error_text:
-                raise RuntimeError(
-                    "Google Drive copy failed because the service account has no Drive storage quota. "
-                    "Use a destination folder inside a Shared Drive that the service account can access, "
-                    "or switch the copy flow to OAuth user credentials instead of the service account."
-                ) from exc
-            raise
+        copied_file = drive_service.files().copy(
+            fileId=file_id,
+            body=file_metadata,
+            supportsAllDrives=True,
+        ).execute()
 
         return copied_file.get("id")
 
