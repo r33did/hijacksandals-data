@@ -1,14 +1,18 @@
+import base64
 import os
 import pickle
 import re
 import webbrowser
 from datetime import datetime
+import json
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.parse import urlparse
 
 import gspread
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow, InstalledAppFlow
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from gspread_dataframe import set_with_dataframe
@@ -55,6 +59,8 @@ def resolve_env_path(env_key: str) -> Path:
 TOKEN_PATH = resolve_env_path("PICKLE_CRED")
 CLIENT_SECRET = resolve_env_path("OAUTH")
 SERVICE_ACCOUNT = resolve_env_path("CREDS")
+USER_TOKEN_DIR = STREAMLIT_DIR / "creds" / "user_tokens"
+USER_OAUTH_STATE_DIR = STREAMLIT_DIR / "creds" / "user_oauth_state"
 
 main_id = os.getenv("GDRIVE_ID")
 template_id = os.getenv("TEMPLATE_ID")
@@ -124,6 +130,186 @@ def call_service():
 
     return creds
 
+
+def load_service_account_email() -> str:
+    with open(SERVICE_ACCOUNT, "r", encoding="utf-8") as service_account_file:
+        payload = json.load(service_account_file)
+
+    service_account_email = str(payload.get("client_email", "")).strip()
+    if not service_account_email:
+        raise ValueError("Service account email is not configured in the credentials file.")
+
+    return service_account_email
+
+
+def sanitize_token_key(raw_value: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(raw_value or "").strip())
+    return normalized.strip("._-") or "default"
+
+
+def get_user_token_path(token_key: str) -> Path:
+    USER_TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+    return USER_TOKEN_DIR / f"{sanitize_token_key(token_key)}.pickle"
+
+
+def get_user_oauth_state_path(token_key: str) -> Path:
+    USER_OAUTH_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    return USER_OAUTH_STATE_DIR / f"{sanitize_token_key(token_key)}.pickle"
+
+
+def load_oauth_client_config(redirect_uri: str) -> dict:
+    with open(CLIENT_SECRET, "r", encoding="utf-8") as client_secret_file:
+        raw_payload = json.load(client_secret_file)
+
+    client_type = "web" if "web" in raw_payload else "installed"
+    client_payload = raw_payload.get(client_type, raw_payload)
+    return {
+        client_type: {
+            "client_id": client_payload["client_id"],
+            "client_secret": client_payload["client_secret"],
+            "auth_uri": client_payload.get("auth_uri", "https://accounts.google.com/o/oauth2/auth"),
+            "token_uri": client_payload.get("token_uri", "https://oauth2.googleapis.com/token"),
+            "auth_provider_x509_cert_url": client_payload.get(
+                "auth_provider_x509_cert_url",
+                "https://www.googleapis.com/oauth2/v1/certs",
+            ),
+            "redirect_uris": [redirect_uri],
+        }
+    }
+
+
+def build_oauth_state(app_username: str, page_name: str, action_name: str) -> str:
+    payload = {
+        "username": str(app_username or "").strip(),
+        "page": str(page_name or "").strip(),
+        "action": str(action_name or "").strip(),
+    }
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8")
+    return encoded.rstrip("=")
+
+
+def parse_oauth_state(state_value: str | None) -> dict:
+    if not state_value:
+        return {}
+
+    padded = state_value + "=" * (-len(state_value) % 4)
+    try:
+        decoded = base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8")
+        return json.loads(decoded)
+    except Exception:
+        return {}
+
+
+def configure_oauth_transport_for_redirect_uri(redirect_uri: str):
+    parsed_uri = urlparse(str(redirect_uri or "").strip())
+    is_local_http = (
+        parsed_uri.scheme == "http"
+        and parsed_uri.hostname in {"localhost", "127.0.0.1", "::1"}
+    )
+    if is_local_http:
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
+
+def build_user_oauth_authorization_url(redirect_uri: str, state: str) -> str:
+    configure_oauth_transport_for_redirect_uri(redirect_uri)
+    flow = Flow.from_client_config(
+        load_oauth_client_config(redirect_uri),
+        scopes=scope,
+        state=state,
+        autogenerate_code_verifier=True,
+    )
+    flow.redirect_uri = redirect_uri
+    authorization_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+    )
+    return authorization_url, getattr(flow, "code_verifier", None)
+
+
+def build_authorization_response_url(redirect_uri: str, params: dict) -> str:
+    filtered_params = {key: value for key, value in params.items() if value is not None}
+    return f"{redirect_uri}?{urlencode(filtered_params, doseq=True)}"
+
+
+def exchange_user_oauth_code(
+    redirect_uri: str,
+    state: str,
+    authorization_response: str,
+    code_verifier: str | None = None,
+):
+    configure_oauth_transport_for_redirect_uri(redirect_uri)
+    flow = Flow.from_client_config(load_oauth_client_config(redirect_uri), scopes=scope, state=state)
+    flow.redirect_uri = redirect_uri
+    if code_verifier:
+        flow.code_verifier = code_verifier
+    flow.fetch_token(authorization_response=authorization_response)
+    return flow.credentials
+
+
+def save_user_oauth_creds(token_key: str, creds) -> Path:
+    token_path = get_user_token_path(token_key)
+    with open(token_path, "wb") as token_file:
+        pickle.dump(creds, token_file)
+    return token_path
+
+
+def load_user_oauth_creds(token_key: str):
+    token_path = get_user_token_path(token_key)
+    if not token_path.exists():
+        return None
+
+    try:
+        with open(token_path, "rb") as token_file:
+            creds = pickle.load(token_file)
+    except Exception:
+        return None
+
+    if creds and creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            save_user_oauth_creds(token_key, creds)
+        except Exception:
+            return None
+
+    if not creds or not creds.valid:
+        return None
+
+    return creds
+
+
+def delete_user_oauth_creds(token_key: str):
+    token_path = get_user_token_path(token_key)
+    if token_path.exists():
+        token_path.unlink()
+
+
+def save_user_oauth_state(token_key: str, payload: dict) -> Path:
+    state_path = get_user_oauth_state_path(token_key)
+    with open(state_path, "wb") as state_file:
+        pickle.dump(payload, state_file)
+    return state_path
+
+
+def load_user_oauth_state(token_key: str) -> dict | None:
+    state_path = get_user_oauth_state_path(token_key)
+    if not state_path.exists():
+        return None
+
+    try:
+        with open(state_path, "rb") as state_file:
+            payload = pickle.load(state_file)
+    except Exception:
+        return None
+
+    return payload if isinstance(payload, dict) else None
+
+
+def delete_user_oauth_state(token_key: str):
+    state_path = get_user_oauth_state_path(token_key)
+    if state_path.exists():
+        state_path.unlink()
+
 #--------
 # Testing Dengan Cara lain 
 #--------
@@ -161,8 +347,9 @@ def call_service():
 
 
 class sheetdrive:
-    def __init__(self):
-        self.creds = call_service()
+    def __init__(self, creds=None):
+        self.creds = creds or call_service()
+        self.service_account_email = load_service_account_email()
         self.main_id = main_id
         self.template_id = template_id
 
@@ -176,6 +363,52 @@ class sheetdrive:
 
     def connect_gspread(self):
         return gspread.authorize(self.creds)
+
+    def ensure_service_account_access(self, file_id: str, role: str = "writer"):
+        if not file_id or not self.service_account_email:
+            return
+
+        drive_service = self.service()
+        permissions = drive_service.permissions().list(
+            fileId=file_id,
+            fields="permissions(id,emailAddress,role,type)",
+            supportsAllDrives=True,
+        ).execute().get("permissions", [])
+
+        existing_permission_id = None
+        existing_role = None
+        for permission in permissions:
+            if (
+                permission.get("type") == "user"
+                and str(permission.get("emailAddress", "")).lower() == self.service_account_email.lower()
+            ):
+                existing_permission_id = permission.get("id")
+                existing_role = permission.get("role")
+                break
+
+        stronger_roles = {"owner", "organizer", "fileOrganizer", "writer"}
+        if existing_role in stronger_roles:
+            return
+
+        if existing_permission_id:
+            drive_service.permissions().update(
+                fileId=file_id,
+                permissionId=existing_permission_id,
+                body={"role": role},
+                supportsAllDrives=True,
+            ).execute()
+            return
+
+        drive_service.permissions().create(
+            fileId=file_id,
+            body={
+                "type": "user",
+                "role": role,
+                "emailAddress": self.service_account_email,
+            },
+            sendNotificationEmail=False,
+            supportsAllDrives=True,
+        ).execute()
 
     def search_filename(self, file_name: str, folder_id: str):
         driver_service = self.service()
@@ -222,7 +455,9 @@ class sheetdrive:
             supportsAllDrives=True,
         ).execute()
 
-        return copied_file.get("id")
+        copied_file_id = copied_file.get("id")
+        self.ensure_service_account_access(copied_file_id)
+        return copied_file_id
 
     def upload_new_gsheet(self, dataframe, spreadsheet_name=None, open_browser=False):
         if not spreadsheet_name:
@@ -239,6 +474,7 @@ class sheetdrive:
 
         file = drive_service.files().create(body=file_metadata, fields="id").execute()
         sheet_id = file.get("id")
+        self.ensure_service_account_access(sheet_id)
         spreadsheet = client.open_by_key(sheet_id)
 
         spreadsheet.share(None, perm_type="anyone", role="writer")
@@ -265,6 +501,8 @@ class sheetdrive:
             file_id = self.search_filename(file_name=file_name, folder_id=self.main_id)
         if not file_id:
             raise ValueError("Spreadsheet target could not be found.")
+
+        self.ensure_service_account_access(file_id)
 
         client = gspread.authorize(self.creds)
         spreadsheet = client.open_by_key(file_id)
