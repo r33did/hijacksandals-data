@@ -9,6 +9,10 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from plugin.postgre.QueryBuilder import Engine, ReadTemplate
+from plugin.sheets.StreamlitGoogleAuth import (
+    get_google_drive_creds,
+    is_google_drive_connected,
+)
 from plugin.sheets.UploadSheets import sheetdrive as SheetDrive
 from plugin.create_yaml.yaml_creator import create_dags_yaml
 
@@ -27,6 +31,14 @@ ENV_PATH = ROOT_DIR / ".env"
 
 load_dotenv(ENV_PATH)
 
+
+def configure_sheetdrive(creds=None, folder_id: str | None = None):
+    global sheetdrive, client
+    sheetdrive = SheetDrive(creds=creds)
+    if folder_id:
+        sheetdrive.set_main_id(folder_id)
+    client = sheetdrive.connect_gspread()
+
 REPORT_MANAGER_SECTIONS = [
     "Refresh Data",
     "Generate & Set Schedule",
@@ -43,12 +55,14 @@ SCHEDULE_DESTINATION_MODES = [
 
 
 @st.cache_data(ttl=300)
-def get_report_list(folder_id: str):
+def get_report_list(folder_id: str, auth_cache_key: str = "service_account"):
+    _ = auth_cache_key
     return dict(sheetdrive.list_folder(folder_id=folder_id))
 
 
 @st.cache_data(ttl=300)
-def get_template_report_list():
+def get_template_report_list(auth_cache_key: str = "service_account"):
+    _ = auth_cache_key
     return dict(sheetdrive.list_folder(folder_id=sheetdrive.template_id, include=".*"))
 
 
@@ -355,8 +369,17 @@ def report_manage():
     init_session_state()
     render_page_tutorial()
     render_template_context()
-
-    gdrive_sheet = get_report_list(sheetdrive.main_id)
+    google_drive_connected = is_google_drive_connected()
+    st.caption(
+        "Google Drive status: "
+        + (
+            "Connected"
+            if google_drive_connected
+            else "Not connected. Connect Google Drive first before using `Generate & Set Schedule`."
+        )
+    )
+    auth_cache_key = st.session_state.get("google_drive_oauth_token_key") or "service_account"
+    gdrive_sheet = get_report_list(sheetdrive.main_id, auth_cache_key=auth_cache_key)
     ordered_sections = get_report_section_order()
     rendered_tabs = dict(zip(ordered_sections, st.tabs(ordered_sections)))
 
@@ -431,7 +454,7 @@ def report_manage():
         selected_template_source_id = None
 
         if schedule_target_mode == SCHEDULE_TARGET_MODES[0]:
-            template_drive_files = get_template_report_list()
+            template_drive_files = get_template_report_list(auth_cache_key=auth_cache_key)
             template_file_names = sorted(template_drive_files.keys())
 
             selected_template_source_name = st.selectbox(
@@ -506,6 +529,7 @@ def report_manage():
             "Generate & Set Schedule",
             type="primary",
             use_container_width=True,
+            disabled=not google_drive_connected,
             on_click=set_active_report_section,
             args=("Generate & Set Schedule",),
         ):
@@ -522,25 +546,29 @@ def report_manage():
             else:
                 try:
                     with st.spinner("Generating sheet, YAML config, and DAG file..."):
+                        authorized_sheetdrive = SheetDrive(creds=get_google_drive_creds())
+                        authorized_sheetdrive.set_main_id(sheetdrive.main_id)
+                        authorized_client = authorized_sheetdrive.connect_gspread()
+
                         if schedule_target_mode == SCHEDULE_TARGET_MODES[0]:
                             copied_spreadsheet_name = (st.session_state.get("schedule_copied_spreadsheet_name") or "").strip()
-                            selected_schedule_report_id = sheetdrive.copy_template(
+                            selected_schedule_report_id = authorized_sheetdrive.copy_template(
                                 file_name=selected_template_source_name,
                                 new_title=copied_spreadsheet_name or selected_template_source_name,
                                 destination_folder_id=destination_folder_id,
                                 template_file_id=selected_template_source_id,
                             )
 
-                        spreadsheet = client.open_by_key(selected_schedule_report_id)
+                        spreadsheet = authorized_client.open_by_key(selected_schedule_report_id)
                         spreadsheet_title = spreadsheet.fetch_sheet_metadata()["properties"]["title"]
 
-                        sheetdrive.get_or_create_sheet(
+                        authorized_sheetdrive.get_or_create_sheet(
                             spreadsheet_id=selected_schedule_report_id,
                             sheet_name=selected_template_table,
                         )
 
                         generated_data = run_template_query(selected_template_table)
-                        sheetdrive.update_gsheet(
+                        authorized_sheetdrive.update_gsheet(
                             spreadsheet_id=selected_schedule_report_id,
                             file_name=spreadsheet_title,
                             dataframe=generated_data,

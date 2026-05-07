@@ -11,6 +11,24 @@ import yaml
 import ExtractPage
 import ReportManagerPage
 from plugin.postgre.QueryBuilder import ReadTemplate
+from plugin.sheets.StreamlitGoogleAuth import (
+    SESSION_NOTICE_KEY,
+    clear_google_drive_creds,
+    build_google_drive_connect_url,
+    ensure_google_drive_session_defaults,
+    get_google_oauth_token_key,
+    get_google_redirect_uri,
+    restore_google_drive_creds,
+    set_google_drive_creds,
+)
+from plugin.sheets.UploadSheets import (
+    build_authorization_response_url,
+    delete_user_oauth_state,
+    exchange_user_oauth_code,
+    load_user_oauth_state,
+    parse_oauth_state,
+    save_user_oauth_creds,
+)
 
 
 
@@ -154,14 +172,74 @@ def normalize_pages(pages):
     return [page for page in pages if page in ADMIN_PAGES] or ["Home"]
 
 
-def apply_runtime_drive_id(drive_id: str):
-    ExtractPage.sheetdrive.set_main_id(drive_id)
-    ReportManagerPage.sheetdrive.set_main_id(drive_id)
+def apply_runtime_drive_context(drive_id: str):
+    ExtractPage.configure_sheetdrive(folder_id=drive_id)
+    ReportManagerPage.configure_sheetdrive(folder_id=drive_id)
 
 
 def get_active_users(config: dict):
     users = config.get("users", {})
     return {username: details for username, details in users.items() if isinstance(details, dict)}
+
+
+def handle_google_drive_oauth_callback(users: dict):
+    callback_keys = {"code", "state", "scope", "error", "authuser", "prompt", "hd"}
+    if not any(key in st.query_params for key in callback_keys):
+        return
+
+    state_value = st.query_params.get("state")
+    state_payload = parse_oauth_state(state_value)
+    username = str(state_payload.get("username", "")).strip()
+    target_page = str(state_payload.get("page", "")).strip() or "Home"
+    action_name = str(state_payload.get("action", "")).strip() or "Google Drive action"
+
+    if username and username in users:
+        st.session_state.logged_in = True
+        st.session_state.username = username
+        st.session_state.role_pages = normalize_pages(users[username].get("pages", []))
+        st.session_state.page = target_page if target_page in ADMIN_PAGES else "Home"
+
+    if "error" in st.query_params:
+        error_value = st.query_params.get("error")
+        st.session_state[SESSION_NOTICE_KEY] = f"Google authorization was not completed: `{error_value}`."
+        st.query_params.clear()
+        if username:
+            st.query_params["user"] = username
+        st.rerun()
+
+    if not username or username not in users or not state_value:
+        st.session_state[SESSION_NOTICE_KEY] = "Google authorization callback could not be matched to an active app user."
+        st.query_params.clear()
+        st.rerun()
+
+    redirect_uri = get_google_redirect_uri()
+    callback_params = {key: st.query_params.get(key) for key in callback_keys if key in st.query_params}
+    authorization_response = build_authorization_response_url(redirect_uri, callback_params)
+    token_key = get_google_oauth_token_key(username)
+    oauth_state_payload = load_user_oauth_state(token_key) or {}
+
+    try:
+        creds = exchange_user_oauth_code(
+            redirect_uri=str(oauth_state_payload.get("redirect_uri") or redirect_uri),
+            state=state_value,
+            authorization_response=authorization_response,
+            code_verifier=oauth_state_payload.get("code_verifier"),
+        )
+        save_user_oauth_creds(token_key, creds)
+        set_google_drive_creds(creds, token_key)
+    except Exception as exc:
+        clear_google_drive_creds()
+        st.session_state[SESSION_NOTICE_KEY] = f"Google authorization failed: {exc}"
+    else:
+        delete_user_oauth_state(token_key)
+        st.session_state[SESSION_NOTICE_KEY] = (
+            f"Google Drive connected for `{action_name}`. "
+            "You can continue using the current page."
+        )
+
+    st.query_params.clear()
+    st.query_params["user"] = username
+    st.rerun()
 
 
 def login(users: dict):
@@ -249,6 +327,7 @@ def render_config_page():
     st.markdown("---")
 
     st.subheader("Google Drive Parent")
+    st.caption(f"Google OAuth redirect URI: `{get_google_redirect_uri()}`")
     with st.form("drive_config_form"):
         drive_id = st.text_input(
             "Main Drive ID",
@@ -261,7 +340,7 @@ def render_config_page():
         config.setdefault("google_drive", {})["main_id"] = drive_id.strip()
         save_app_config(config)
         update_env_value("GDRIVE_ID", drive_id.strip())
-        apply_runtime_drive_id(drive_id.strip())
+        apply_runtime_drive_context(drive_id.strip())
         st.success("Drive configuration updated.")
     
     st.markdown("---")
@@ -473,9 +552,10 @@ def render_config_page():
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
+ensure_google_drive_session_defaults()
 app_config = load_app_config()
 USERS = get_active_users(app_config)
-apply_runtime_drive_id(app_config.get("google_drive", {}).get("main_id", os.getenv("GDRIVE_ID", "")))
+handle_google_drive_oauth_callback(USERS)
 
 if not st.session_state.logged_in and "user" in st.query_params:
     user_param = st.query_params["user"]
@@ -486,14 +566,20 @@ if not st.session_state.logged_in and "user" in st.query_params:
         st.session_state.page = "Home"
 
 if not st.session_state.logged_in:
+    clear_google_drive_creds()
     login(USERS)
 else:
     if st.session_state.username not in USERS:
         st.session_state.logged_in = False
+        clear_google_drive_creds()
         st.query_params.clear()
         st.rerun()
 
     st.session_state.role_pages = normalize_pages(USERS[st.session_state.username].get("pages", []))
+    runtime_google_creds = restore_google_drive_creds(st.session_state.username)
+    apply_runtime_drive_context(
+        app_config.get("google_drive", {}).get("main_id", os.getenv("GDRIVE_ID", "")),
+    )
 
     with st.sidebar:
         col1, col2, col3 = st.columns([1, 50, 1])
@@ -516,11 +602,28 @@ else:
 
         st.markdown("---")
         st.write(f"Logged in as: **{st.session_state.username}**")
+        st.write(f"Google Drive: **{'Connected' if runtime_google_creds else 'Not connected'}**")
+        if not runtime_google_creds:
+            google_connect_url = build_google_drive_connect_url(
+                page_name=st.session_state.page if "page" in st.session_state else "Home",
+                action_name="connect google drive",
+            )
+            if google_connect_url:
+                st.link_button("Connect Google Drive", google_connect_url, use_container_width=True)
+        if runtime_google_creds and st.button("Disconnect Google Drive", use_container_width=True):
+            clear_google_drive_creds()
+            st.session_state[SESSION_NOTICE_KEY] = "Google Drive connection removed for this app user."
+            st.rerun()
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.page = "Home"
+            clear_google_drive_creds()
             st.query_params.clear()
             st.rerun()
+
+    if st.session_state.get(SESSION_NOTICE_KEY):
+        st.info(st.session_state[SESSION_NOTICE_KEY])
+        st.session_state[SESSION_NOTICE_KEY] = None
 
     selection = st.session_state.page if "page" in st.session_state else "Home"
 

@@ -3,10 +3,21 @@ import datetime
 import streamlit as st
 
 from plugin.postgre.QueryBuilder import Engine
+from plugin.sheets.StreamlitGoogleAuth import (
+    get_google_drive_creds,
+    is_google_drive_connected,
+)
 from plugin.sheets.UploadSheets import sheetdrive as SheetDrive
 
 engine = Engine()
 sheetdrive = SheetDrive()
+
+
+def configure_sheetdrive(creds=None, folder_id: str | None = None):
+    global sheetdrive
+    sheetdrive = SheetDrive(creds=creds)
+    if folder_id:
+        sheetdrive.set_main_id(folder_id)
 
 
 @st.cache_data(ttl=300)
@@ -33,10 +44,64 @@ def init_session_state():
     defaults = {
         "filters": [],
         "db_select": None,
+        "extract_result": None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def render_extract_result(active_table_name: str | None):
+    extract_result = st.session_state.get("extract_result")
+    if not extract_result or extract_result.get("table_name") != active_table_name:
+        return
+
+    dataframe = extract_result.get("dataframe")
+    if dataframe is None or dataframe.empty:
+        st.info("No data returned from query.")
+        return
+
+    st.success(f"Successfully retrieved {len(dataframe)} rows!")
+    st.caption("Data only shows first 50 rows")
+    st.dataframe(dataframe.head(50), use_container_width=True)
+
+    with st.expander("Show Generated SQL"):
+        st.code(
+            f"Generated Query:\n{extract_result.get('used_query')}\n\nParams: {extract_result.get('params')}",
+            language="sql",
+        )
+
+    csv = dataframe.to_csv(index=False).encode("utf-8")
+    op1, op2 = st.columns(2)
+    with op1:
+        st.download_button(
+            label="Download Data as CSV",
+            data=csv,
+            file_name=f"{active_table_name}_extract.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+    with op2:
+        if not is_google_drive_connected():
+            st.button(
+                label="Upload To Spreadsheet",
+                use_container_width=True,
+                disabled=True,
+            )
+            st.caption("Connect Google Drive first using the sidebar button.")
+        elif st.button(
+            label="Upload To Spreadsheet",
+            use_container_width=True,
+        ):
+            try:
+                authorized_sheetdrive = SheetDrive(creds=get_google_drive_creds())
+                authorized_sheetdrive.set_main_id(sheetdrive.main_id)
+                spreadsheet_url = authorized_sheetdrive.upload_new_gsheet(dataframe=dataframe)
+            except Exception as exc:
+                st.error(f"Failed to upload spreadsheet: {exc}")
+            else:
+                st.success("Spreadsheet created successfully.")
+                st.markdown(f"[Open spreadsheet]({spreadsheet_url})")
 
 
 def extract_page():
@@ -53,6 +118,15 @@ def extract_page():
             )
         )
 
+    st.caption(
+        "Google Drive status: "
+        + (
+            "Connected"
+            if is_google_drive_connected()
+            else "Not connected. Use the sidebar button to connect before uploading to spreadsheet."
+        )
+    )
+
     init_session_state()
     table_name = st.selectbox("Database Table", tables, placeholder="Select Table", key="db_select")
 
@@ -66,14 +140,22 @@ def extract_page():
             st.error("Failed to fetch columns")
 
         st.markdown("**Filter by Date (Optional)**")
-        date_cols = [column for column, column_type in columns_dict.items() if "date" in column_type.lower() or "time" in column_type.lower()]
+        date_cols = [
+            column
+            for column, column_type in columns_dict.items()
+            if "date" in column_type.lower() or "time" in column_type.lower()
+        ]
         disabled = not bool(date_cols)
 
         d_col1, d_col2, d_col3 = st.columns(3)
         with d_col1:
             date_column = st.selectbox("Date Column", ["None"] + date_cols)
         with d_col2:
-            start_date = st.date_input("Start Date", value=datetime.date.today() - datetime.timedelta(days=30), disabled=disabled)
+            start_date = st.date_input(
+                "Start Date",
+                value=datetime.date.today() - datetime.timedelta(days=30),
+                disabled=disabled,
+            )
         with d_col3:
             end_date = st.date_input("End Date", value=datetime.date.today(), disabled=disabled)
 
@@ -162,12 +244,16 @@ def extract_page():
                 repr_final_conditions = []
                 for condition in updated_conditions:
                     if condition["operator"] == "IN" and isinstance(condition["value"], str):
-                        condition["value"] = tuple([item.strip() for item in condition["value"].split(",") if item.strip()])
+                        condition["value"] = tuple(
+                            [item.strip() for item in condition["value"].split(",") if item.strip()]
+                        )
                     final_conditions.append(condition)
 
                 for condition in repr_conditions:
                     if condition["operator"] == "IN" and isinstance(condition["value"], str):
-                        condition["value"] = tuple([item.strip() for item in condition["value"].split(",") if item.strip()])
+                        condition["value"] = tuple(
+                            [item.strip() for item in condition["value"].split(",") if item.strip()]
+                        )
                     repr_final_conditions.append(condition)
 
                 query, params = engine.build_dynamic_query(
@@ -186,38 +272,19 @@ def extract_page():
                     conditions=repr_final_conditions,
                 )
 
-                df = engine.execute_query(query=query, params=tuple(params))
+                dataframe = engine.execute_query(query=query, params=tuple(params))
                 used_query = query
 
-                if df.empty:
-                    st.toast("Query returned no rows, trying alternative query", icon=":!")
-                    df = engine.execute_query(query=repr_query, params=tuple(params))
+                if dataframe.empty:
+                    st.toast("Query returned no rows, trying alternative query", icon="❗")
+                    dataframe = engine.execute_query(query=repr_query, params=tuple(params))
                     used_query = repr_query
 
-                with st.expander("Show Generated SQL"):
-                    st.code(f"Generated Query:\n{used_query}\n\nParams: {params}", language="sql")
+                st.session_state.extract_result = {
+                    "table_name": table_name,
+                    "dataframe": dataframe,
+                    "used_query": used_query,
+                    "params": params,
+                }
 
-                if df.empty:
-                    st.info("No data returned from query.")
-                else:
-                    st.success(f"Successfully retrieved {len(df)} rows!")
-                    st.caption("Data only shows first 50 rows")
-                    st.dataframe(df.head(50), use_container_width=True)
-
-                    csv = df.to_csv(index=False).encode("utf-8")
-
-                    op1, op2 = st.columns(2)
-                    with op1:
-                        st.download_button(
-                            label="Download Data as CSV",
-                            data=csv,
-                            file_name=f"{table_name}_extract.csv",
-                            mime="text/csv",
-                            use_container_width=True,
-                        )
-                    with op2:
-                        st.button(
-                            label="Upload To Spreadsheet",
-                            use_container_width=True,
-                            on_click=lambda: sheetdrive.upload_new_gsheet(dataframe=df),
-                        )
+        render_extract_result(table_name)
