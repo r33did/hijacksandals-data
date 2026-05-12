@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from urllib.parse import urlparse
 
 import gspread
+import pandas as pd
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import Flow, InstalledAppFlow
@@ -530,11 +531,12 @@ class sheetdrive:
             header_values = [value if value is not None else "" for value in headers["values_a_to_c"]]
             worksheet.update("A1:C1", [header_values], raw=False)
 
-        sample_rows = worksheet_spec.get("sample_rows", [])
-        if sample_rows:
-            width = max(len(row) for row in sample_rows)
+        seed_rows = worksheet_spec.get("seed_rows") or worksheet_spec.get("sample_rows") or []
+        if seed_rows:
+            normalized_rows = self._normalize_blueprint_rows(seed_rows)
+            width = max(len(row) for row in normalized_rows)
             end_column = gspread.utils.rowcol_to_a1(1, width).rstrip("1")
-            worksheet.update(f"A2:{end_column}{len(sample_rows) + 1}", sample_rows, raw=False)
+            worksheet.update(f"A2:{end_column}{len(normalized_rows) + 1}", normalized_rows, raw=False)
 
         formulas = worksheet_spec.get("formulas", [])
         for formula_spec in formulas:
@@ -549,6 +551,111 @@ class sheetdrive:
             notes = worksheet_spec.get("rebuild_notes") or []
             if notes:
                 worksheet.update("A1", [[notes[0]]], raw=False)
+
+    def _normalize_blueprint_rows(self, rows: list[list]):
+        normalized_rows = []
+        for row in rows:
+            normalized_row = []
+            for value in row:
+                if isinstance(value, dict) and "formula" in value:
+                    normalized_row.append(value["formula"])
+                elif value is None:
+                    normalized_row.append("")
+                else:
+                    normalized_row.append(value)
+            normalized_rows.append(normalized_row)
+        return normalized_rows
+
+    def materialize_blueprint_reports(
+        self,
+        spreadsheet_id: str,
+        blueprint_path: str | Path,
+    ):
+        blueprint_file = Path(blueprint_path)
+        with open(blueprint_file, "r", encoding="utf-8") as blueprint_handle:
+            blueprint = json.load(blueprint_handle)
+
+        worksheets = blueprint.get("worksheets", [])
+        if not worksheets:
+            return
+
+        client = self.connect_gspread()
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        worksheet_map = {worksheet.title: worksheet for worksheet in spreadsheet.worksheets()}
+        worksheet_specs = {
+            str(item.get("name") or "").strip(): item
+            for item in worksheets
+            if str(item.get("name") or "").strip()
+        }
+
+        for worksheet_name, worksheet_spec in worksheet_specs.items():
+            if worksheet_name in worksheet_map and worksheet_spec.get("role") == "lookup_mapping":
+                self._apply_blueprint_sheet(worksheet_map[worksheet_name], worksheet_spec)
+
+        for worksheet_name, worksheet_spec in worksheet_specs.items():
+            pivot_spec = worksheet_spec.get("pivot_spec")
+            if not pivot_spec or worksheet_name not in worksheet_map:
+                continue
+            source_sheet_name = str(pivot_spec.get("source_sheet") or "").strip()
+            if not source_sheet_name or source_sheet_name not in worksheet_map:
+                continue
+
+            source_records = worksheet_map[source_sheet_name].get_all_records()
+            source_df = pd.DataFrame(source_records)
+            if source_df.empty:
+                continue
+
+            summary_df = self._build_summary_from_pivot_spec(source_df, pivot_spec)
+            target_sheet = worksheet_map[worksheet_name]
+            target_sheet.clear()
+            if summary_df.empty:
+                target_sheet.update("A1", [["No data available for this summary."]], raw=False)
+                continue
+            set_with_dataframe(target_sheet, summary_df, include_index=False, include_column_header=True)
+
+    def _build_summary_from_pivot_spec(self, source_df: pd.DataFrame, pivot_spec: dict) -> pd.DataFrame:
+        row_groups = [field for field in pivot_spec.get("row_groups", []) if field in source_df.columns]
+        column_groups = [field for field in pivot_spec.get("column_groups", []) if field in source_df.columns]
+        value_specs = [item for item in pivot_spec.get("values", []) if item.get("source_field") in source_df.columns]
+
+        if not value_specs:
+            return pd.DataFrame()
+
+        working_df = source_df.copy()
+        for spec in value_specs:
+            field_name = spec["source_field"]
+            working_df[field_name] = pd.to_numeric(working_df[field_name], errors="coerce").fillna(0)
+
+        value_fields = [spec["source_field"] for spec in value_specs]
+        aggfunc = "sum"
+        summary = pd.pivot_table(
+            working_df,
+            index=row_groups or None,
+            columns=column_groups or None,
+            values=value_fields,
+            aggfunc=aggfunc,
+            fill_value=0,
+        )
+
+        if isinstance(summary, pd.Series):
+            summary = summary.to_frame()
+
+        if isinstance(summary.columns, pd.MultiIndex):
+            summary.columns = [
+                " | ".join(str(part) for part in column_parts if part not in (None, ""))
+                for column_parts in summary.columns.to_flat_index()
+            ]
+        else:
+            summary.columns = [str(column) for column in summary.columns]
+
+        if any(spec.get("display_name") for spec in value_specs) and not column_groups and len(value_specs) == len(summary.columns):
+            rename_map = {
+                spec["source_field"]: spec.get("display_name") or spec["source_field"]
+                for spec in value_specs
+            }
+            summary = summary.rename(columns=rename_map)
+
+        return summary.reset_index()
 
     def upload_new_gsheet(self, dataframe, spreadsheet_name=None, open_browser=False):
         if not spreadsheet_name:

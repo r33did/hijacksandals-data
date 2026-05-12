@@ -624,6 +624,11 @@ def report_manage():
                             overwrite=True,
                             open_browser=False,
                         )
+                        if schedule_target_mode == SCHEDULE_TARGET_MODES[1] and selected_blueprint_path:
+                            authorized_sheetdrive.materialize_blueprint_reports(
+                                spreadsheet_id=selected_schedule_report_id,
+                                blueprint_path=selected_blueprint_path,
+                            )
 
                         yaml_path, generated_dag_path = generate_dag_artifacts(
                             template_name=selected_template_table,
