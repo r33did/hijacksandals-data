@@ -26,6 +26,7 @@ ROOT_DIR = BASE_DIR.parents[1]
 
 # CONFIG_DIR = BASE_DIR.parent / "config" -> ROOT_DIR / "config" pake config di ROOT_DIR aja, karena generate_dags.py juga butuh akses ke config dan dijalankan dari ROOT_DIR
 CONFIG_DIR = ROOT_DIR / "config"
+BLUEPRINT_DIR = ROOT_DIR / "streamlit" / "config" / "sheet_blueprints"
 SCHEDULE_REGISTRY_PATH = CONFIG_DIR / "scheduled_reports.json"
 ENV_PATH = ROOT_DIR / ".env"
 
@@ -46,6 +47,7 @@ REPORT_MANAGER_SECTIONS = [
 ]
 SCHEDULE_TARGET_MODES = [
     "Copy from Template Drive",
+    "Create from Blueprint Template",
     "Use Existing Spreadsheet ID",
 ]
 SCHEDULE_DESTINATION_MODES = [
@@ -64,6 +66,16 @@ def get_report_list(folder_id: str, auth_cache_key: str = "service_account"):
 def get_template_report_list(auth_cache_key: str = "service_account"):
     _ = auth_cache_key
     return dict(sheetdrive.list_folder(folder_id=sheetdrive.template_id, include=".*"))
+
+
+@st.cache_data(ttl=300)
+def get_blueprint_template_list() -> dict[str, str]:
+    if not BLUEPRINT_DIR.exists():
+        return {}
+    return {
+        blueprint_path.name: str(blueprint_path)
+        for blueprint_path in sorted(BLUEPRINT_DIR.glob("*.json"))
+    }
 
 
 def time_to_cron(
@@ -452,6 +464,8 @@ def report_manage():
         selected_schedule_report_id = None
         selected_template_source_name = None
         selected_template_source_id = None
+        selected_blueprint_name = None
+        selected_blueprint_path = None
 
         if schedule_target_mode == SCHEDULE_TARGET_MODES[0]:
             template_drive_files = get_template_report_list(auth_cache_key=auth_cache_key)
@@ -472,6 +486,29 @@ def report_manage():
                 "Copied Spreadsheet Title",
                 placeholder="Leave blank to reuse the template spreadsheet name",
                 key="schedule_copied_spreadsheet_name",
+                on_change=set_active_report_section,
+                args=("Generate & Set Schedule",),
+            )
+            destination_folder_id = render_schedule_destination_folder_selector()
+        elif schedule_target_mode == SCHEDULE_TARGET_MODES[1]:
+            blueprint_files = get_blueprint_template_list()
+            blueprint_names = sorted(blueprint_files.keys())
+
+            selected_blueprint_name = st.selectbox(
+                "Select Blueprint Template",
+                options=blueprint_names if blueprint_names else ["No blueprint template found"],
+                disabled=not blueprint_names,
+                key="schedule_blueprint_source_name",
+                on_change=set_active_report_section,
+                args=("Generate & Set Schedule",),
+            )
+            if blueprint_names:
+                selected_blueprint_path = blueprint_files.get(selected_blueprint_name)
+
+            st.text_input(
+                "Generated Spreadsheet Title",
+                placeholder="Leave blank to reuse the blueprint file name",
+                key="schedule_blueprint_spreadsheet_name",
                 on_change=set_active_report_section,
                 args=("Generate & Set Schedule",),
             )
@@ -537,7 +574,11 @@ def report_manage():
                 st.error("Please choose one template spreadsheet to copy first.")
             elif schedule_target_mode == SCHEDULE_TARGET_MODES[0] and not destination_folder_id:
                 st.error("Please choose a destination Drive folder first.")
-            elif schedule_target_mode == SCHEDULE_TARGET_MODES[1] and not selected_schedule_report_id:
+            elif schedule_target_mode == SCHEDULE_TARGET_MODES[1] and not selected_blueprint_path:
+                st.error("Please choose one blueprint template first.")
+            elif schedule_target_mode == SCHEDULE_TARGET_MODES[1] and not destination_folder_id:
+                st.error("Please choose a destination Drive folder first.")
+            elif schedule_target_mode == SCHEDULE_TARGET_MODES[2] and not selected_schedule_report_id:
                 st.error("Please input the spreadsheet target first.")
             elif not selected_template_table:
                 st.error("Please choose one template first.")
@@ -557,6 +598,13 @@ def report_manage():
                                 new_title=copied_spreadsheet_name or selected_template_source_name,
                                 destination_folder_id=destination_folder_id,
                                 template_file_id=selected_template_source_id,
+                            )
+                        elif schedule_target_mode == SCHEDULE_TARGET_MODES[1]:
+                            generated_spreadsheet_name = (st.session_state.get("schedule_blueprint_spreadsheet_name") or "").strip()
+                            selected_schedule_report_id = authorized_sheetdrive.create_from_blueprint(
+                                blueprint_path=selected_blueprint_path,
+                                spreadsheet_name=generated_spreadsheet_name or Path(selected_blueprint_path).stem,
+                                destination_folder_id=destination_folder_id,
                             )
 
                         spreadsheet = authorized_client.open_by_key(selected_schedule_report_id)
