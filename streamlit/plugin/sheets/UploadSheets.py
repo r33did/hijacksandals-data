@@ -364,9 +364,6 @@ class sheetdrive:
     def connect_gspread(self):
         return gspread.authorize(self.creds)
 
-    def _resolve_parent_folder_id(self, destination_folder_id: str | None = None) -> str:
-        return (destination_folder_id or main_id or self.main_id or template_id or self.template_id or "").strip()
-
     def ensure_service_account_access(self, file_id: str, role: str = "writer"):
         if not file_id or not self.service_account_email:
             return
@@ -435,7 +432,7 @@ class sheetdrive:
         template_file_id: str | None = None,
     ):
         drive_service = self.service()
-        target_folder_id = self._resolve_parent_folder_id(destination_folder_id)
+        target_folder_id = (destination_folder_id or self.main_id or self.template_id or "").strip()
         if not target_folder_id:
             raise ValueError("Drive destination folder ID is not configured.")
 
@@ -461,94 +458,6 @@ class sheetdrive:
         copied_file_id = copied_file.get("id")
         self.ensure_service_account_access(copied_file_id)
         return copied_file_id
-
-    def create_from_blueprint(
-        self,
-        blueprint_path: str | Path,
-        spreadsheet_name: str | None = None,
-        destination_folder_id: str | None = None,
-    ) -> str:
-        blueprint_file = Path(blueprint_path)
-        if not blueprint_file.exists():
-            raise FileNotFoundError(f"Blueprint file not found: {blueprint_file}")
-
-        with open(blueprint_file, "r", encoding="utf-8") as blueprint_handle:
-            blueprint = json.load(blueprint_handle)
-
-        worksheets = blueprint.get("worksheets", [])
-        if not worksheets:
-            raise ValueError("Blueprint does not define any worksheets.")
-
-        sheet_order = blueprint.get("workbook", {}).get("sheet_order") or [item.get("name") for item in worksheets]
-        ordered_names = [str(name).strip() for name in sheet_order if str(name).strip()]
-        if not ordered_names:
-            raise ValueError("Blueprint does not define a valid sheet order.")
-
-        target_folder_id = self._resolve_parent_folder_id(destination_folder_id)
-        if not target_folder_id:
-            raise ValueError("Drive destination folder ID is not configured.")
-
-        drive_service = self.service()
-        client = self.connect_gspread()
-        file_metadata = {
-            "name": (spreadsheet_name or blueprint_file.stem).strip(),
-            "mimeType": "application/vnd.google-apps.spreadsheet",
-            "parents": [target_folder_id],
-        }
-        created_file = drive_service.files().create(body=file_metadata, fields="id").execute()
-        spreadsheet_id = created_file.get("id")
-        self.ensure_service_account_access(spreadsheet_id)
-        spreadsheet = client.open_by_key(spreadsheet_id)
-
-        first_sheet = spreadsheet.sheet1
-        first_sheet_name = ordered_names[0]
-        first_sheet.update_title(first_sheet_name)
-
-        existing_sheet_names = {worksheet.title for worksheet in spreadsheet.worksheets()}
-        for sheet_name in ordered_names[1:]:
-            if sheet_name not in existing_sheet_names:
-                spreadsheet.add_worksheet(title=sheet_name, rows="1000", cols="26")
-                existing_sheet_names.add(sheet_name)
-
-        worksheet_map = {worksheet.title: worksheet for worksheet in spreadsheet.worksheets()}
-        for worksheet_spec in worksheets:
-            sheet_name = str(worksheet_spec.get("name") or "").strip()
-            if not sheet_name or sheet_name not in worksheet_map:
-                continue
-
-            worksheet = worksheet_map[sheet_name]
-            self._apply_blueprint_sheet(worksheet, worksheet_spec)
-
-        return spreadsheet_id
-
-    def _apply_blueprint_sheet(self, worksheet, worksheet_spec: dict):
-        headers = worksheet_spec.get("headers", {})
-        if "values_a_to_r" in headers:
-            header_values = [value if value is not None else "" for value in headers["values_a_to_r"]]
-            worksheet.update("A1:R1", [header_values], raw=False)
-        elif "values_a_to_c" in headers:
-            header_values = [value if value is not None else "" for value in headers["values_a_to_c"]]
-            worksheet.update("A1:C1", [header_values], raw=False)
-
-        sample_rows = worksheet_spec.get("sample_rows", [])
-        if sample_rows:
-            width = max(len(row) for row in sample_rows)
-            end_column = gspread.utils.rowcol_to_a1(1, width).rstrip("1")
-            worksheet.update(f"A2:{end_column}{len(sample_rows) + 1}", sample_rows, raw=False)
-
-        formulas = worksheet_spec.get("formulas", [])
-        for formula_spec in formulas:
-            cell = formula_spec.get("cell")
-            formula = formula_spec.get("formula")
-            if not cell or not formula:
-                continue
-            worksheet.update(cell, [[formula]], raw=False)
-
-        role = worksheet_spec.get("role")
-        if role == "summary_report":
-            notes = worksheet_spec.get("rebuild_notes") or []
-            if notes:
-                worksheet.update("A1", [[notes[0]]], raw=False)
 
     def upload_new_gsheet(self, dataframe, spreadsheet_name=None, open_browser=False):
         if not spreadsheet_name:
