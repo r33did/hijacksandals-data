@@ -365,9 +365,6 @@ class sheetdrive:
     def connect_gspread(self):
         return gspread.authorize(self.creds)
 
-    def _resolve_parent_folder_id(self, destination_folder_id: str | None = None) -> str:
-        return (destination_folder_id or main_id or self.main_id or template_id or self.template_id or "").strip()
-
     def ensure_service_account_access(self, file_id: str, role: str = "writer"):
         if not file_id or not self.service_account_email:
             return
@@ -436,7 +433,7 @@ class sheetdrive:
         template_file_id: str | None = None,
     ):
         drive_service = self.service()
-        target_folder_id = self._resolve_parent_folder_id(destination_folder_id)
+        target_folder_id = (destination_folder_id or self.main_id or self.template_id or "").strip()
         if not target_folder_id:
             raise ValueError("Drive destination folder ID is not configured.")
 
