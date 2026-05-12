@@ -359,6 +359,9 @@ class sheetdrive:
             self.main_id = folder_id.strip()
         return self.main_id
 
+    def _resolve_parent_folder_id(self, destination_folder_id: str | None = None) -> str:
+        return (destination_folder_id or self.main_id or self.template_id or "").strip()
+
     def service(self):
         return build("drive", "v3", credentials=self.creds)
 
