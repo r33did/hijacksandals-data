@@ -16,6 +16,9 @@ from plugin.sheets.StreamlitGoogleAuth import (
     clear_google_drive_creds,
     build_google_drive_connect_url,
     ensure_google_drive_session_defaults,
+    get_google_drive_auth_source,
+    get_google_drive_refresh_help,
+    get_google_drive_token_status,
     get_google_oauth_token_key,
     get_google_redirect_uri,
     restore_google_drive_creds,
@@ -228,7 +231,7 @@ def handle_google_drive_oauth_callback(users: dict):
         save_user_oauth_creds(token_key, creds)
         set_google_drive_creds(creds, token_key)
     except Exception as exc:
-        clear_google_drive_creds()
+        clear_google_drive_creds(remove_saved_token=False)
         st.session_state[SESSION_NOTICE_KEY] = f"Google authorization failed: {exc}"
     else:
         delete_user_oauth_state(token_key)
@@ -566,12 +569,12 @@ if not st.session_state.logged_in and "user" in st.query_params:
         st.session_state.page = "Home"
 
 if not st.session_state.logged_in:
-    clear_google_drive_creds()
+    clear_google_drive_creds(remove_saved_token=False)
     login(USERS)
 else:
     if st.session_state.username not in USERS:
         st.session_state.logged_in = False
-        clear_google_drive_creds()
+        clear_google_drive_creds(remove_saved_token=False)
         st.query_params.clear()
         st.rerun()
 
@@ -602,22 +605,50 @@ else:
 
         st.markdown("---")
         st.write(f"Logged in as: **{st.session_state.username}**")
-        st.write(f"Google Drive: **{'Connected' if runtime_google_creds else 'Not connected'}**")
+        token_status = get_google_drive_token_status()
+        auth_source = get_google_drive_auth_source()
+        if runtime_google_creds:
+            source_label = "Installed Flow token" if auth_source == "installed_app" else "Web OAuth token"
+            st.write(f"Google Drive: **Connected**")
+            st.caption(f"Credential source: {source_label}.")
+        else:
+            st.write("Google Drive: **Not connected**")
+            if token_status.get("message"):
+                st.caption(token_status["message"])
+
         if not runtime_google_creds:
+            if st.button("Check Google Drive Token", use_container_width=True):
+                runtime_google_creds = restore_google_drive_creds(st.session_state.username)
+                if runtime_google_creds:
+                    st.session_state[SESSION_NOTICE_KEY] = "Google Drive token ditemukan dan siap dipakai."
+                else:
+                    status_message = token_status.get("message") or "Google Drive token belum tersedia."
+                    st.session_state[SESSION_NOTICE_KEY] = (
+                        f"{status_message} {get_google_drive_refresh_help(headless=True)}"
+                    )
+                st.rerun()
+
+            with st.expander("How to refresh Google Drive token", expanded=False):
+                st.markdown(get_google_drive_refresh_help(headless=True))
+                if token_status.get("token_path"):
+                    st.code(token_status["token_path"], language="text")
+
             google_connect_url = build_google_drive_connect_url(
                 page_name=st.session_state.page if "page" in st.session_state else "Home",
                 action_name="connect google drive",
             )
             if google_connect_url:
-                st.link_button("Connect Google Drive", google_connect_url, use_container_width=True)
-        if runtime_google_creds and st.button("Disconnect Google Drive", use_container_width=True):
+                st.caption("Optional: you can still use the existing web OAuth flow below.")
+                st.link_button("Connect Google Drive (Web OAuth)", google_connect_url, use_container_width=True)
+        if runtime_google_creds and st.button("Disconnect Google Drive", use_container_width=True,disabled=True): # False apabila sudah bener 
             clear_google_drive_creds()
-            st.session_state[SESSION_NOTICE_KEY] = "Google Drive connection removed for this app user."
+            disconnect_scope = "the shared Google Drive token" if auth_source == "installed_app" else "this app user"
+            st.session_state[SESSION_NOTICE_KEY] = f"Google Drive connection removed for {disconnect_scope}."
             st.rerun()
         if st.button("Logout", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.page = "Home"
-            clear_google_drive_creds()
+            clear_google_drive_creds(remove_saved_token=False)
             st.query_params.clear()
             st.rerun()
 
