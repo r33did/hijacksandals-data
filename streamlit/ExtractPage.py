@@ -6,7 +6,7 @@ from plugin.postgre.QueryBuilder import Engine
 from plugin.sheets.UploadSheets import sheetdrive as SheetDrive
 
 engine = Engine()
-sheetdrive = SheetDrive()
+sheetdrive = SheetDrive(auth_mode="oauth")
 
 
 @st.cache_data(ttl=300)
@@ -203,6 +203,7 @@ def extract_page():
                     st.success(f"Successfully retrieved {len(df)} rows!")
                     st.caption("Data only shows first 50 rows")
                     st.dataframe(df.head(50), use_container_width=True)
+                    google_drive_ready = sheetdrive.is_ready()
 
                     csv = df.to_csv(index=False).encode("utf-8")
 
@@ -216,8 +217,11 @@ def extract_page():
                             use_container_width=True,
                         )
                     with op2:
+                        if not google_drive_ready:
+                            st.caption("Connect Google Drive from the sidebar to upload this extract.")
                         st.button(
                             label="Upload To Spreadsheet",
                             use_container_width=True,
+                            disabled=not google_drive_ready,
                             on_click=lambda: sheetdrive.upload_new_gsheet(dataframe=df),
                         )

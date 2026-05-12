@@ -13,8 +13,7 @@ from plugin.sheets.UploadSheets import sheetdrive as SheetDrive
 from plugin.create_yaml.yaml_creator import create_dags_yaml
 
 engine = Engine()
-sheetdrive = SheetDrive()
-client = sheetdrive.connect_gspread()
+sheetdrive = SheetDrive(auth_mode="oauth")
 templatequery = ReadTemplate()
 
 BASE_DIR = Path(__file__).resolve()
@@ -43,12 +42,14 @@ SCHEDULE_DESTINATION_MODES = [
 
 
 @st.cache_data(ttl=300)
-def get_report_list(folder_id: str):
+def get_report_list(folder_id: str, user_key: str):
+    del user_key
     return dict(sheetdrive.list_folder(folder_id=folder_id))
 
 
 @st.cache_data(ttl=300)
-def get_template_report_list():
+def get_template_report_list(user_key: str):
+    del user_key
     return dict(sheetdrive.list_folder(folder_id=sheetdrive.template_id, include=".*"))
 
 
@@ -356,7 +357,12 @@ def report_manage():
     render_page_tutorial()
     render_template_context()
 
-    gdrive_sheet = get_report_list(sheetdrive.main_id)
+    if not sheetdrive.is_ready():
+        st.info("Connect Google Drive from the sidebar before managing reports.")
+        return
+
+    oauth_user = sheetdrive.oauth_user or ""
+    gdrive_sheet = get_report_list(sheetdrive.main_id, oauth_user)
     ordered_sections = get_report_section_order()
     rendered_tabs = dict(zip(ordered_sections, st.tabs(ordered_sections)))
 
@@ -375,7 +381,7 @@ def report_manage():
                 st.error("Please choose a spreadsheet first.")
             else:
                 with st.spinner("Updating matching worksheets..."):
-                    spreadsheet = client.open_by_key(selected_refresh_report_id)
+                    spreadsheet = sheetdrive.connect_gspread().open_by_key(selected_refresh_report_id)
                     metadata = spreadsheet.fetch_sheet_metadata()
                     spreadsheet_title = metadata["properties"]["title"]
                     worksheets = [item["properties"]["title"] for item in metadata["sheets"]]
@@ -431,7 +437,7 @@ def report_manage():
         selected_template_source_id = None
 
         if schedule_target_mode == SCHEDULE_TARGET_MODES[0]:
-            template_drive_files = get_template_report_list()
+            template_drive_files = get_template_report_list(oauth_user)
             template_file_names = sorted(template_drive_files.keys())
 
             selected_template_source_name = st.selectbox(
@@ -531,7 +537,7 @@ def report_manage():
                                 template_file_id=selected_template_source_id,
                             )
 
-                        spreadsheet = client.open_by_key(selected_schedule_report_id)
+                        spreadsheet = sheetdrive.connect_gspread().open_by_key(selected_schedule_report_id)
                         spreadsheet_title = spreadsheet.fetch_sheet_metadata()["properties"]["title"]
 
                         sheetdrive.get_or_create_sheet(
